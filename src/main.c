@@ -1,10 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
+
+#include "tokenize.h"
+#include "execute.h"
+
+void clear_screen() {
+  write(1, "\033[2J\033[H", 7);
+}
 
 int main(int argc, char *argv[]) {
+  (void)argc;
+  (void)argv;
   setbuf(stdout, NULL);
 
+  clear_screen();
   for(;;) {
     // Display prompt
     char prompt[2] = {'$', ' '};
@@ -19,19 +30,15 @@ int main(int argc, char *argv[]) {
       command[read - 1] = '\0';
       read--;
     }
-    
-    // Error handling
-    char buf[128];
-    int len = snprintf(buf, sizeof(buf), "%s: command not found", command);
-    write(1, buf, len);
 
-    // Print newline before exiting
-    write(1, "\n", 1);
+    // Tokenize
+    TokenArray tokenArray;
+    tokenize(command, &tokenArray);
 
-
-    // Free allocated memory
-    free(command);
+    // Execute
+    execute(&tokenArray);
   }
 
+  clear_screen();
   return 0;
 }
