@@ -24,11 +24,11 @@ int main(int argc, char *argv[]) {
   int len = snprintf(buf, sizeof(buf), "%s: command not found", command);
   write(1, buf, len);
 
+  // Print newline before exiting
+  write(1, "\n", 1);
+
+
   // Free allocated memory
   free(command);
-
-  // Print newline before exiting
-  write(2, "\n", 1);
-
   return 0;
 }
