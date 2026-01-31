@@ -5,6 +5,26 @@
 
 #include "error.h"
 #include "execute.h"
+#include "helpers.h"
+
+void type_command(TokenArray* tokenArray) {
+  // For now only supports a single argument
+  if (tokenArray->count < 2) {
+    error(ERROR_INSUFFICIENT_ARGUMENTS, tokenArray->tokens[0].value);
+    return;
+  }
+
+  TokenType type = tokenArray->tokens[1].type;
+  char* command = tokenArray->tokens[1].value;
+  switch(type) {
+    case TOKEN_COMMAND:      
+      builtin_type(command);
+      break;
+    default:
+      unknown_type(command);
+      break;
+  }
+}
 
 void clear_command() {
   write(1, "\x1b[H\x1b[2J", 7);
@@ -31,6 +51,8 @@ void execute(TokenArray* tokenArray) {
     echo_command(tokenArray);
   } else if (strcmp(toExec, "clear") == 0) {
     clear_command();
+  } else if (strcmp(toExec, "type") == 0) {
+    type_command(tokenArray);
   } else {
     error(ERROR_COMMAND_NOT_FOUND, tokenArray->tokens[0].value);
   }

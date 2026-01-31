@@ -3,6 +3,7 @@
 
 typedef enum {
     ERROR_COMMAND_NOT_FOUND,
+    ERROR_INSUFFICIENT_ARGUMENTS
 } ErrorType;
 
 void error(ErrorType errorType, const char* details);

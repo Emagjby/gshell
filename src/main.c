@@ -5,10 +5,7 @@
 
 #include "tokenize.h"
 #include "execute.h"
-
-void clear_screen() {
-  write(1, "\033[2J\033[H", 7);
-}
+#include "helpers.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;
@@ -17,27 +14,18 @@ int main(int argc, char *argv[]) {
 
   clear_screen();
   for(;;) {
-    // Display prompt
-    char prompt[2] = {'$', ' '};
-    write(1, prompt, sizeof(prompt));
+    write_prompt();
 
-    // Read user input & remove \n
-    char *command = NULL;
-    size_t cap = 0;
-
-    ssize_t read = getline(&command, &cap, stdin);
-    if (command[0] == '\n') {
-      free(command);
+    // Read user input 
+    char* input = get_input();
+    if (input[0] == '\n') {
+      free(input);
       continue;
-    }
-    if (read > 0 && command[read - 1] == '\n') {
-      command[read - 1] = '\0';
-      read--;
     }
 
     // Tokenize
     TokenArray tokenArray;
-    tokenize(command, &tokenArray);
+    tokenize(input, &tokenArray);
 
     // Execute
     execute(&tokenArray);
