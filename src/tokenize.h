@@ -19,5 +19,6 @@ typedef struct {
 } TokenArray;
 
 void tokenize(char* input, TokenArray* tokenArray);
+void freeTokenArray(TokenArray* tokenArray);
  
 #endif 

@@ -26,6 +26,10 @@ int main(int argc, char *argv[]) {
     size_t cap = 0;
 
     ssize_t read = getline(&command, &cap, stdin);
+    if (command[0] == '\n') {
+      free(command);
+      continue;
+    }
     if (read > 0 && command[read - 1] == '\n') {
       command[read - 1] = '\0';
       read--;
@@ -37,6 +41,9 @@ int main(int argc, char *argv[]) {
 
     // Execute
     execute(&tokenArray);
+
+    // Free resources
+    freeTokenArray(&tokenArray);
   }
 
   clear_screen();

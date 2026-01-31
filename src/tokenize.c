@@ -1,11 +1,15 @@
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "tokenize.h"
 
 TokenType categorizeToken(const char* value, int* count) {
-  if(strcmp(value, "exit") == 0 && *count == 0) {
+  if( strcmp(value, "exit") == 0 ||
+      strcmp(value, "echo") == 0 ||
+      strcmp(value, "clear") == 0 ||
+      strcmp(value, "type") == 0) {
     return TOKEN_COMMAND;
   } 
   if (*count == 0) {
@@ -61,3 +65,9 @@ void tokenize(char* input, TokenArray* tokenArray) {
   free(input);
 }
 
+void freeTokenArray(TokenArray* tokenArray) {
+  for (int i = 0; i < tokenArray->count; i++) {
+    free(tokenArray->tokens[i].value);
+  }
+  free(tokenArray->tokens);
+}
