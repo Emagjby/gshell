@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -68,7 +69,9 @@ char** decompose_args(TokenArray tokens, int* out_count) {
 }
 
 char* build_full_path(const char* directory, const char* command) {
-    static char full_path[1024];
-    snprintf(full_path, sizeof(full_path), "%s/%s", directory, command);
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "%s/%s", directory, command);
+
+    char* full_path = strcpy(malloc(strlen(buf) + 1), buf);
     return full_path;
 }

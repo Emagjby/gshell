@@ -28,6 +28,7 @@ void type_command(TokenArray* tokenArray) {
         char buf[256];
         int len = snprintf(buf, sizeof(buf), "%s is %s\n", command, full_path);
         write(1, buf, len);
+        free(full_path);
       } else {
         unknown_type(command);
       }
@@ -56,6 +57,7 @@ void run_command(TokenArray* tokenArray, char* path) {
   char* full_path = build_full_path(path, tokenArray->tokens[0].value);
 
   run_program(full_path, args);
+  free(full_path);
 }
 
 void execute(TokenArray* tokenArray) {
@@ -75,6 +77,7 @@ void execute(TokenArray* tokenArray) {
 
     if (found) {
       run_command(tokenArray, found);
+      free(found);
       return;
     }
 

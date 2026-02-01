@@ -7,18 +7,9 @@
 #include "fs.h"
 
 TokenType categorizeToken(const char* value, int* count) {
-  if( strcmp(value, "exit") == 0 ||
-      strcmp(value, "echo") == 0 ||
-      strcmp(value, "clear") == 0 ||
-      strcmp(value, "type") == 0) {
+  if(*count == 0) {
     return TOKEN_COMMAND;
-  } 
-  if (*count == 0) {
-    if (check_path_directories(value) != NULL) {
-      return TOKEN_COMMAND;
-    }
-    return TOKEN_UNKNOWN;
-  } 
+  }
   return TOKEN_ARGUMENT;
 }
 
@@ -60,11 +51,6 @@ void tokenize(char* input, TokenArray* tokenArray) {
     }
 
     tokenArray->tokens[tokenArray->count++] = consumed;
-
-    if (consumed.type == TOKEN_UNKNOWN) {
-      // if unknown token, no need to continue tokenizing
-      break;
-    }
   }
   free(input);
 }

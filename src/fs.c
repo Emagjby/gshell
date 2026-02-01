@@ -87,7 +87,7 @@ void run_program(const char* path, char** argv){
         perror("execv failed");
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
-        wait(NULL);
+        waitpid(pid, NULL, 0);
     } else {
         perror("fork");
     }

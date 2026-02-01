@@ -4,7 +4,6 @@
 typedef enum {
     TOKEN_COMMAND,
     TOKEN_ARGUMENT,
-    TOKEN_UNKNOWN
 } TokenType;
 
 typedef struct {
