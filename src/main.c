@@ -18,11 +18,10 @@ int main(int argc, char *argv[]) {
 
     // Read user input 
     char* input = get_input();
-    if (input[0] == '\n') {
-      free(input);
+    if (is_empty(input)) {
       continue;
     }
-
+    
     // Tokenize
     TokenArray tokenArray;
     tokenize(input, &tokenArray);
