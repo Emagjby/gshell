@@ -8,6 +8,9 @@
 #include "fs.h"
 
 TokenType categorizeToken(const char* value) {
+  if(value[0] == '\0'){
+    return TOKEN_EMPTY;
+  }
   if(is_builtin_command(value)){
     return TOKEN_COMMAND;
   }
@@ -45,6 +48,9 @@ void tokenize(char* input, TokenArray* tokenArray) {
   int i = 0;
   while (input[i] != '\0') {
     Token consumed = consumeToken(input, &i);
+    if(consumed.type == TOKEN_EMPTY) {
+      continue;
+    }
     
     if (tokenArray->count >= tokenArray->cap) {
       tokenArray->cap *= 2;
