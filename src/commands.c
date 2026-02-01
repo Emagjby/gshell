@@ -23,7 +23,7 @@ void type_command(TokenArray* tokenArray) {
     case TOKEN_COMMAND:      
       builtin_type(command);
       break;
-    default:
+    default: {
       char* found = check_path_directories(command);
       if (found) {
         char* full_path = build_full_path(found, command);
@@ -35,6 +35,7 @@ void type_command(TokenArray* tokenArray) {
         unknown_type(command);
       }
       break;
+    }
   }
 }
 
