@@ -4,16 +4,17 @@
 #include <string.h>
 
 #include "tokenize.h"
+#include "helpers.h"
 #include "fs.h"
 
-TokenType categorizeToken(const char* value, int* count) {
-  if(*count == 0) {
+TokenType categorizeToken(const char* value) {
+  if(is_builtin_command(value)){
     return TOKEN_COMMAND;
   }
   return TOKEN_ARGUMENT;
 }
 
-Token consumeToken(const char* input, int* index, int* count) {
+Token consumeToken(const char* input, int* index) {
   // Skip whitespaces
   while (input[*index] == ' ') {
     (*index)++;
@@ -30,7 +31,7 @@ Token consumeToken(const char* input, int* index, int* count) {
 
   strncpy(token.value, &input[start], length);
   token.value[length] = '\0';
-  token.type = categorizeToken(token.value, count);
+  token.type = categorizeToken(token.value);
 
   return token;
 }
@@ -43,7 +44,7 @@ void tokenize(char* input, TokenArray* tokenArray) {
 
   int i = 0;
   while (input[i] != '\0') {
-    Token consumed = consumeToken(input, &i, &tokenArray->count);
+    Token consumed = consumeToken(input, &i);
     
     if (tokenArray->count >= tokenArray->cap) {
       tokenArray->cap *= 2;

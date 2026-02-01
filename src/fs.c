@@ -62,7 +62,7 @@ void free_directories(char** directories, int count) {
 char* check_path_directories(const char* command) {
     char* path_env = getenv("PATH");
     if (path_env == NULL) {
-        return "\0";
+        return NULL;
     }
 
     char** directories = decompose_path(path_env);
