@@ -6,6 +6,7 @@
 #include "tokenize.h"
 #include "execute.h"
 #include "helpers.h"
+#include "fs.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;

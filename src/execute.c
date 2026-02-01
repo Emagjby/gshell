@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include "error.h"
+#include "fs.h"
 #include "execute.h"
 #include "helpers.h"
 
@@ -21,7 +22,14 @@ void type_command(TokenArray* tokenArray) {
       builtin_type(command);
       break;
     default:
-      unknown_type(command);
+      char* found = check_path_directories(command);
+      if (*found != '\0') {
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf), "%s is %s/%s\n", command, found, command);
+        write(1, buf, len);
+      } else {
+        unknown_type(command);
+      }
       break;
   }
 }
