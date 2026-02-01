@@ -72,7 +72,12 @@ void pwd_command(void) {
 
 void cd_command(TokenArray* tokenArray) {
   if (tokenArray->count < 2) {
-    error(ERROR_INSUFFICIENT_ARGUMENTS, tokenArray->tokens[0].value);
+    char* home = getenv("HOME");
+    if (home == NULL) {
+        error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
+        return;
+    }
+    chdir(getenv("HOME"));
     return;
   }
 
