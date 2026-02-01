@@ -24,8 +24,9 @@ void type_command(TokenArray* tokenArray) {
     default:
       char* found = check_path_directories(command);
       if (found) {
+        char* full_path = build_full_path(found, command);
         char buf[256];
-        int len = snprintf(buf, sizeof(buf), "%s is %s/%s\n", command, found, command);
+        int len = snprintf(buf, sizeof(buf), "%s is %s\n", command, full_path);
         write(1, buf, len);
       } else {
         unknown_type(command);
@@ -48,6 +49,15 @@ void echo_command(TokenArray* tokenArray) {
   write(1, "\n", 1);
 }
 
+void run_command(TokenArray* tokenArray, char* path) {
+  int argCount = 0;
+  char** args = decompose_args(*tokenArray, &argCount);
+
+  char* full_path = build_full_path(path, tokenArray->tokens[0].value);
+
+  run_program(full_path, args);
+}
+
 void execute(TokenArray* tokenArray) {
   char* toExec = tokenArray->tokens[0].value;
 
@@ -61,6 +71,13 @@ void execute(TokenArray* tokenArray) {
   } else if (strcmp(toExec, "type") == 0) {
     type_command(tokenArray);
   } else {
+    char* found = check_path_directories(toExec);
+
+    if (found) {
+      run_command(tokenArray, found);
+      return;
+    }
+
     error(ERROR_COMMAND_NOT_FOUND, tokenArray->tokens[0].value);
   }
 }

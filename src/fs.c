@@ -1,3 +1,6 @@
+#define _POSIX_C_SOURCE 200809L
+#include <sys/wait.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,11 +70,25 @@ char* check_path_directories(const char* command) {
 
     for(int count = 0; directories[count] != NULL; count++) {
         if(check_directory(directories[count], command)) {
-            result = directories[count];
+            result = strcpy(malloc(strlen(directories[count]) + 1), directories[count]);
             break;
         }
     }
 
     free_directories(directories, count_dirs(path_env));
     return result;
+}
+
+void run_program(const char* path, char** argv){
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        execv(path, argv);
+        perror("execv failed");
+        exit(EXIT_FAILURE);
+    } else if (pid > 0) {
+        wait(NULL);
+    } else {
+        perror("fork");
+    }
 }

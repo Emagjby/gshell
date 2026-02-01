@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "tokenize.h"
+#include "fs.h"
 
 TokenType categorizeToken(const char* value, int* count) {
   if( strcmp(value, "exit") == 0 ||
@@ -13,6 +14,9 @@ TokenType categorizeToken(const char* value, int* count) {
     return TOKEN_COMMAND;
   } 
   if (*count == 0) {
+    if (check_path_directories(value) != NULL) {
+      return TOKEN_COMMAND;
+    }
     return TOKEN_UNKNOWN;
   } 
   return TOKEN_ARGUMENT;
