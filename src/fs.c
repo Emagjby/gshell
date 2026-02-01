@@ -33,7 +33,7 @@ char** decompose_path(const char* path_env) {
     char** directories = malloc(sizeof(char*) * (count + 1));
 
     for (int i = 0; path_env[i] != '\0'; i++) {
-        if (path_env[i] == ':') {
+        if (path_env[i] == ':' || path_env[i + 1] == '\0') {
             int length = i - start;
             char* dir = malloc(length + 1);
             strncpy(dir, &path_env[start], length);
@@ -44,6 +44,7 @@ char** decompose_path(const char* path_env) {
             directories[index++] = dir;
         }
     }
+    directories[index] = NULL;
 
     return directories;
 }
@@ -62,12 +63,15 @@ char* check_path_directories(const char* command) {
     }
 
     char** directories = decompose_path(path_env);
+    char* result = NULL;
 
     for(int count = 0; directories[count] != NULL; count++) {
         if(check_directory(directories[count], command)) {
-            return directories[count];
+            result = directories[count];
+            break;
         }
     }
 
-    return "\0";
+    free_directories(directories, count_dirs(path_env));
+    return result;
 }

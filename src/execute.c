@@ -23,7 +23,7 @@ void type_command(TokenArray* tokenArray) {
       break;
     default:
       char* found = check_path_directories(command);
-      if (*found != '\0') {
+      if (found) {
         char buf[256];
         int len = snprintf(buf, sizeof(buf), "%s is %s/%s\n", command, found, command);
         write(1, buf, len);
