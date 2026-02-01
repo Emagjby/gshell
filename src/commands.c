@@ -76,8 +76,13 @@ void cd_command(TokenArray* tokenArray) {
     return;
   }
 
-  char* path = tokenArray->tokens[1].value;
+  char* path = malloc(strlen(tokenArray->tokens[1].value) + 1);
+  strcpy(path, tokenArray->tokens[1].value);
+
+  handle_home(&path);
+
   if (chdir(path) != 0) {
     error(ERROR_CD_NO_SUCH_DIRECTORY, path);
   }
+  free(path);
 }

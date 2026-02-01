@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "helpers.h"
+#include "error.h"
 #include "tokenize.h"
 
 void clear_screen(void) {
@@ -84,4 +85,18 @@ char* build_full_path(const char* directory, const char* command) {
 
     char* full_path = strcpy(malloc(strlen(buf) + 1), buf);
     return full_path;
+}
+
+void handle_home(char** path) {
+    if((*path)[0] == '~') {
+        const char* home = getenv("HOME");
+        if(home) {
+            char buf[1024];
+            snprintf(buf, sizeof(buf), "%s%s", home, (*path) + 1);
+            free(*path);
+            *path = strcpy(malloc(strlen(buf) + 1), buf);
+            return;
+        }
+        error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
+    }
 }

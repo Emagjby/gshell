@@ -5,6 +5,7 @@ typedef enum {
     ERROR_COMMAND_NOT_FOUND,
     ERROR_INSUFFICIENT_ARGUMENTS,
     ERROR_CD_NO_SUCH_DIRECTORY,
+    ERROR_ENVIRONMENT_VARIABLE_NOT_SET,
 } ErrorType;
 
 void error(ErrorType errorType, const char* details);

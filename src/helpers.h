@@ -16,4 +16,7 @@ void unknown_type(char* command);
 char** decompose_args(TokenArray tokens, int* out_count);
 char* build_full_path(const char* directory, const char* command);
 
+// cd command helpers
+void handle_home(char** path);
+
 #endif
