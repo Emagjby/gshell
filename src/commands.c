@@ -69,3 +69,15 @@ void pwd_command(void) {
   write(1, cwd, strlen(cwd));
   write(1, "\n", 1);
 }
+
+void cd_command(TokenArray* tokenArray) {
+  if (tokenArray->count < 2) {
+    error(ERROR_INSUFFICIENT_ARGUMENTS, tokenArray->tokens[0].value);
+    return;
+  }
+
+  char* path = tokenArray->tokens[1].value;
+  if (chdir(path) != 0) {
+    error(ERROR_CD_NO_SUCH_DIRECTORY, path);
+  }
+}

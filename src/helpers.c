@@ -21,7 +21,7 @@ void builtin_type(char* command) {
     write(1, buf, len);
 }
 
-int is_builtin_command(char* command) {
+int is_builtin_command(const char* command) {
     const char* builtins[] = {"cd", "exit", "clear", "type", "echo", "pwd", NULL};
     for (int i = 0; builtins[i] != NULL; i++) {
         if (strcmp(command, builtins[i]) == 0) {

@@ -21,6 +21,8 @@ void execute(TokenArray* tokenArray) {
     type_command(tokenArray);
   } else if (strcmp(toExec, "pwd") == 0) {
     pwd_command();
+  } else if (strcmp(toExec, "cd") == 0) {
+    cd_command(tokenArray);
   } else {
     char* found = check_path_directories(toExec);
 
