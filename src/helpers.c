@@ -36,17 +36,9 @@ char* get_input(void){
     }
 
     if(read <= 0) {
-        command[0] = '\0';
+        return NULL;
     }
 
     return command;
 }
 
-
-int is_empty(char* input) {
-    if(input[0] == '\0') {
-        free(input);
-        return 1;
-    }
-    return 0;
-}

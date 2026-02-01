@@ -8,6 +8,5 @@ char* get_input(void);
 // type command helpers
 void builtin_type(char* command);
 void unknown_type(char* command);
-int is_empty(char* input);
 
 #endif

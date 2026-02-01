@@ -42,7 +42,6 @@ void echo_command(TokenArray* tokenArray) {
 
 void execute(TokenArray* tokenArray) {
   char* toExec = tokenArray->tokens[0].value;
-  char* args[ tokenArray->count ];
 
   if(strcmp(toExec, "exit") == 0) {
     write(1, "\n", 1);

@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
 
     // Read user input 
     char* input = get_input();
-    if (is_empty(input)) {
+    if (input == NULL) {
       continue;
     }
     
