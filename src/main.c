@@ -3,13 +3,11 @@
 #include <unistd.h>
 #include <string.h>
 
-// #include "tokenize.h"
-// #include "execute.h"
+#include "execute.h"
 #include "panic.h"
 #include "helpers.h"
 #include "tokenizer.h"
 #include "parser.h"
-// #include "fs.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;
@@ -35,12 +33,8 @@ int main(int argc, char *argv[]) {
     // Parse
     ArgVec argVec = parse(tokenArray);
 
-    for(int i = 0; i < argVec.count; i++) {
-      printf("arg[%d]: %s\n", i, argVec.args[i]);
-    }
-
-    // // Execute
-    // execute(&tokenArray);
+    // Execute
+    execute(argVec);
 
     // Free resources
     free(input);

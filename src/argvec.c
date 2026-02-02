@@ -23,3 +23,13 @@ void append_arg_end(ArgVec* argv) {
 
     argv->args[argv->count] = NULL;
 }
+
+void free_argvec(ArgVec* argv) {
+    for (int i = 0; i < argv->count; i++) {
+        free(argv->args[i]);
+    }
+    free(argv->args);
+    argv->args = NULL;
+    argv->count = 0;
+    argv->cap = 0;
+}

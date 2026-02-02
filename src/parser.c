@@ -42,6 +42,11 @@ ArgVec parse(TokenArray tokens) {
         Token token = tokens.tokens[index];
 
         if(token.type == TOKEN_WHITESPACE || token.type == TOKEN_EOL) {
+            if(start == index) {
+                start = index + 1;
+                continue;
+            }
+
             // build argument from tokens[start] to tokens[index - 1]
             char* arg = build_argument(&tokens, start, index);
 

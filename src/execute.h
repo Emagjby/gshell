@@ -1,8 +1,8 @@
 #ifndef EXECUTE_H_
 #define EXECUTE_H_
 
-#include "tokenize.h"
+#include "argvec.h"
 
-void execute(TokenArray* tokenArray);
+void execute(ArgVec argv);
 
 #endif

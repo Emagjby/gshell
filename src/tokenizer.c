@@ -25,7 +25,7 @@ void append_token(TokenArray* tokenArray, Token token) {
   tokenArray->tokens[tokenArray->count++] = token;
 }
 
-TokenType categorizeToken(const char* value) {
+TokenType categorizeToken() {
   return TOKEN_TEXT;
 }
 
@@ -60,7 +60,7 @@ TokenArray tokenize(const char* input) {
       token.value = malloc(length + 1);
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
-      token.type = categorizeToken(token.value);
+      token.type = categorizeToken();
 
       // append token
       append_token(&tokenArray, token);      
@@ -100,7 +100,7 @@ TokenArray tokenize(const char* input) {
       token.value = malloc(length + 1);
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
-      token.type = categorizeToken(token.value);
+      token.type = categorizeToken();
 
       // append token
       append_token(&tokenArray, token);
