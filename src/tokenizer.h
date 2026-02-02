@@ -4,6 +4,7 @@
 typedef enum {
     TOKEN_WHITESPACE,
     TOKEN_TEXT,
+    TOKEN_EOL
 } TokenType;
 
 typedef struct {

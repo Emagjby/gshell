@@ -5,6 +5,7 @@
 
 // #include "tokenize.h"
 // #include "execute.h"
+#include "panic.h"
 #include "helpers.h"
 #include "tokenizer.h"
 // #include "fs.h"
@@ -16,6 +17,9 @@ int main(int argc, char *argv[]) {
 
   clear_screen();
   for(;;) {
+    if(setjmp(panic_env)) {
+      continue;
+    }
     write_prompt();
 
     // Read user input 
@@ -25,6 +29,10 @@ int main(int argc, char *argv[]) {
     }
 
     TokenArray tokenArray = tokenize(input);
+
+    for(int i = 0; i < tokenArray.count; i++) {
+      printf("Token %d: Type %d, Value: '%s'\n", i, tokenArray.tokens[i].type, tokenArray.tokens[i].value);
+    }
 
     // // Execute
     // execute(&tokenArray);

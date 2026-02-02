@@ -112,5 +112,6 @@ TokenArray tokenize(const char* input) {
     error(ERROR_TOKENIZATION_FAILED, "An unknown tokenization error occurred");
   }
 
+  append_token(&tokenArray, (Token){NULL, TOKEN_EOL});
   return tokenArray;
 }

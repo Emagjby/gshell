@@ -7,4 +7,4 @@ extern jmp_buf panic_env;
 
 void panic(void);
 
-#endif PANIC_H_
+#endif 

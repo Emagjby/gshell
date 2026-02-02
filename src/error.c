@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "panic.h"
 #include "error.h"
 
 void error_command_not_found(const char* command) {
@@ -51,5 +52,6 @@ void error(ErrorType errorType, const char* details) {
             error_generic("An unknown error occurred:", details);
             break;
     }
+    panic();
 }
 
