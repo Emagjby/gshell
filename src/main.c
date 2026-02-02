@@ -8,6 +8,7 @@
 #include "panic.h"
 #include "helpers.h"
 #include "tokenizer.h"
+#include "parser.h"
 // #include "fs.h"
 
 int main(int argc, char *argv[]) {
@@ -17,9 +18,9 @@ int main(int argc, char *argv[]) {
 
   clear_screen();
   for(;;) {
-    if(setjmp(panic_env)) {
-      continue;
-    }
+    if(setjmp(panic_env)) { continue; } // recover from panic
+
+    // write prompt
     write_prompt();
 
     // Read user input 
@@ -28,17 +29,20 @@ int main(int argc, char *argv[]) {
       continue;
     }
 
+    // Tokenize
     TokenArray tokenArray = tokenize(input);
 
-    for(int i = 0; i < tokenArray.count; i++) {
-      printf("Token %d: Type %d, Value: '%s'\n", i, tokenArray.tokens[i].type, tokenArray.tokens[i].value);
+    // Parse
+    ArgVec argVec = parse(tokenArray);
+
+    for(int i = 0; i < argVec.count; i++) {
+      printf("arg[%d]: %s\n", i, argVec.args[i]);
     }
 
     // // Execute
     // execute(&tokenArray);
 
     // Free resources
-    free_token_array(&tokenArray);
     free(input);
   }
 
