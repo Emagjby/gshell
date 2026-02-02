@@ -5,37 +5,47 @@
 #include <stdlib.h>
 
 #include "fs.h"
+#include "argvec.h"
 #include "execute.h"
 #include "helpers.h"
 #include "commands.h"
 #include "error.h"
+#include "dynbuf.h"
 
-void type_command(TokenArray* tokenArray) {
+void type_command(ArgVec argv) {
   // For now only supports a single argument
-  if (tokenArray->count < 2) {
-    error(ERROR_INSUFFICIENT_ARGUMENTS, tokenArray->tokens[0].value);
+  if (argv.count < 2) {
+    error(ERROR_INSUFFICIENT_ARGUMENTS, argv.args[0]);
+    free_argvec(&argv);
     return;
   }
 
-  TokenType type = tokenArray->tokens[1].type;
-  char* command = tokenArray->tokens[1].value;
-  switch(type) {
-    case TOKEN_COMMAND:      
-      builtin_type(command);
-      break;
-    default: {
-      char* found = check_path_directories(command);
-      if (found) {
-        char* full_path = build_full_path(found, command);
-        char buf[256];
-        int len = snprintf(buf, sizeof(buf), "%s is %s\n", command, full_path);
-        write(1, buf, len);
-        free(full_path);
-      } else {
-        unknown_type(command);
-      }
-      break;
-    }
+  if(is_builtin_command(argv.args[1])) {
+    builtin_type(argv.args[1]);
+    free_argvec(&argv);
+    return;
+  }
+
+  char* found = check_path_directories(argv.args[1]);
+  if (found) {
+    // build full path
+    char* full_path = build_full_path(found, argv.args[1]);
+
+    DynBuf dynbuf;
+    dynbuf_init(&dynbuf);
+
+    dynbuf_append(&dynbuf, argv.args[1]);
+    dynbuf_append(&dynbuf, " is ");
+    dynbuf_append(&dynbuf, full_path);
+    dynbuf_append(&dynbuf, "\n");
+
+    write(1, dynbuf.buf, dynbuf.len);
+    dynbuf_free(&dynbuf);
+    free_argvec(&argv);
+    free(full_path);
+  } else {
+    unknown_type(argv.args[1]);
+    free_argvec(&argv);
   }
 }
 
@@ -43,25 +53,25 @@ void clear_command() {
   write(1, "\x1b[H\x1b[2J", 7);
 }
 
-void echo_command(TokenArray* tokenArray) {
-  for(int i = 1; i < tokenArray->count; i++) {
-    write(1, tokenArray->tokens[i].value, strlen(tokenArray->tokens[i].value));
-    if (i < tokenArray->count - 1) {
+void echo_command(ArgVec argv) {
+  for(int i = 1; i < argv.count; i++) {
+    write(1, argv.args[i], strlen(argv.args[i]));
+    if (i < argv.count - 1) {
       write(1, " ", 1);
     }
   }
+
   write(1, "\n", 1);
+  free_argvec(&argv);
 }
 
-void run_command(TokenArray* tokenArray, char* path) {
-  int argCount = 0;
-  char** args = decompose_args(*tokenArray, &argCount);
+void run_command(ArgVec argv, char* path) {
+  char* full_path = build_full_path(path, argv.args[0]);
 
-  char* full_path = build_full_path(path, tokenArray->tokens[0].value);
+  run_program(full_path, argv.args);
 
-  run_program(full_path, args);
   free(full_path);
-  free(args);
+  free_argvec(&argv);
 }
 
 void pwd_command(void) {
@@ -71,8 +81,8 @@ void pwd_command(void) {
   write(1, "\n", 1);
 }
 
-void cd_command(TokenArray* tokenArray) {
-  if (tokenArray->count < 2) {
+void cd_command(ArgVec argv) {
+  if (argv.count < 2) {
     char* home = getenv("HOME");
     if (home == NULL) {
         error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
@@ -82,13 +92,12 @@ void cd_command(TokenArray* tokenArray) {
     return;
   }
 
-  char* path = malloc(strlen(tokenArray->tokens[1].value) + 1);
-  strcpy(path, tokenArray->tokens[1].value);
-
+  char* path = strcpy(malloc(strlen(argv.args[1]) + 1), argv.args[1]);
   handle_home(&path);
 
   if (chdir(path) != 0) {
+    free_argvec(&argv);
     error(ERROR_CD_NO_SUCH_DIRECTORY, path);
   }
-  free(path);
+  free_argvec(&argv);
 }

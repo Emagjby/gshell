@@ -3,10 +3,11 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "tokenize.h"
 #include "execute.h"
+#include "panic.h"
 #include "helpers.h"
-#include "fs.h"
+#include "tokenizer.h"
+#include "parser.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;
@@ -15,6 +16,9 @@ int main(int argc, char *argv[]) {
 
   clear_screen();
   for(;;) {
+    if(setjmp(panic_env)) { continue; } // recover from panic
+
+    // write prompt
     write_prompt();
 
     // Read user input 
@@ -22,16 +26,18 @@ int main(int argc, char *argv[]) {
     if (input == NULL) {
       continue;
     }
-    
+
     // Tokenize
-    TokenArray tokenArray;
-    tokenize(input, &tokenArray);
+    TokenArray tokenArray = tokenize(input);
+
+    // Parse
+    ArgVec argVec = parse(tokenArray);
 
     // Execute
-    execute(&tokenArray);
+    execute(argVec);
 
     // Free resources
-    freeTokenArray(&tokenArray);
+    free(input);
   }
 
   clear_screen();

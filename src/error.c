@@ -1,30 +1,58 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "panic.h"
 #include "error.h"
+#include "dynbuf.h"
 
 void error_command_not_found(const char* command) {
-    char buf[512];
-    int len = snprintf(buf, sizeof(buf), "%s: command not found\n", command);
-    write(2, buf, len);
+    DynBuf dynbuf;
+    dynbuf_init(&dynbuf);
+
+    dynbuf_append(&dynbuf, command);
+    dynbuf_append(&dynbuf, ": command not found\n");
+
+    write(2, dynbuf.buf, dynbuf.len);
+    dynbuf_free(&dynbuf);
 }
 
 void error_insufficient_arguments(const char* command) {
-    char buf[512];
-    int len = snprintf(buf, sizeof(buf), "%s: insufficient arguments provided\n", command);
-    write(2, buf, len);
+    DynBuf dynbuf;
+    dynbuf_init(&dynbuf);
+
+    dynbuf_append(&dynbuf, command);
+    dynbuf_append(&dynbuf, ": insufficient arguments provided\n");
+
+    write(2, dynbuf.buf, dynbuf.len);
+
+    dynbuf_free(&dynbuf);
 }
 
 void error_generic(const char* message, const char* details) {
-    char buf[512];
-    int len = snprintf(buf, sizeof(buf), "%s\n\n\x1b[31m%s\x1b[0m\n", message, details);
-    write(2, buf, len);
+    DynBuf dynbuf;
+    dynbuf_init(&dynbuf);
+
+    dynbuf_append(&dynbuf, message);
+    dynbuf_append(&dynbuf, "\n\x1b[31m");
+    dynbuf_append(&dynbuf, details);
+    dynbuf_append(&dynbuf, "\x1b[0m\n\n");
+    
+    write(2, dynbuf.buf, dynbuf.len);
+
+    dynbuf_free(&dynbuf);
 }
 
 void error_no_such_directory(const char* directory) {
-    char buf[512];
-    int len = snprintf(buf, sizeof(buf), "cd: %s: No such file or directory\n", directory);
-    write(2, buf, len);
+    DynBuf dynbuf;
+    dynbuf_init(&dynbuf);
+
+    dynbuf_append(&dynbuf, "cd: ");
+    dynbuf_append(&dynbuf, directory);
+    dynbuf_append(&dynbuf, ": No such file or directory\n");
+
+    write(2, dynbuf.buf, dynbuf.len);
+
+    dynbuf_free(&dynbuf);
 }
 
 void error(ErrorType errorType, const char* details) {
@@ -41,9 +69,16 @@ void error(ErrorType errorType, const char* details) {
         case ERROR_ENVIRONMENT_VARIABLE_NOT_SET:
             error_generic("Environment variable not set: ", details);
             break;
+        case ERROR_UNTERMINATED_QUOTE:
+            error_generic("Unterminated quote detected in input:", details);
+            break;
+        case ERROR_TOKENIZATION_FAILED:
+            error_generic("Tokenization failed:", details);
+            break;
         default:
             error_generic("An unknown error occurred:", details);
             break;
     }
+    panic();
 }
 

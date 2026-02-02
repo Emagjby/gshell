@@ -5,7 +5,7 @@
 
 #include "helpers.h"
 #include "error.h"
-#include "tokenize.h"
+#include "dynbuf.h"
 
 void clear_screen(void) {
     write(1, "\033[2J\033[H", 7);
@@ -17,9 +17,14 @@ void write_prompt(void) {
 }
 
 void builtin_type(char* command) {
-    char buf[256];
-    int len = snprintf(buf, sizeof(buf), "%s is a shell builtin\n", command);
-    write(1, buf, len);
+    DynBuf dynbuf;
+    dynbuf_init(&dynbuf);
+
+    dynbuf_append(&dynbuf, command);
+    dynbuf_append(&dynbuf, " is a shell builtin\n");
+
+    write(1, dynbuf.buf, dynbuf.len);
+    dynbuf_free(&dynbuf);
 }
 
 int is_builtin_command(const char* command) {
@@ -30,12 +35,6 @@ int is_builtin_command(const char* command) {
         }
     }
     return 0;
-}
-
-void unknown_type(char* command) {
-    char buf[256];
-    int len = snprintf(buf, sizeof(buf), "%s: not found\n", command);
-    write(1, buf, len);
 }
 
 char* get_input(void){
@@ -55,46 +54,44 @@ char* get_input(void){
     return command;
 }
 
-char** decompose_args(TokenArray tokens, int* out_count) {
-    int count = 1; // include command itself
+char* build_full_path(const char* directory, const char* command) {
+    DynBuf dynbuf;
+    dynbuf_init(&dynbuf);
 
-    for(int i = 1; i < tokens.count; i++) {
-        if(tokens.tokens[i].type == TOKEN_ARGUMENT) {
-            count++;
-        }
-    }
+    dynbuf_append(&dynbuf, directory);
+    dynbuf_append(&dynbuf, "/");
+    dynbuf_append(&dynbuf, command);
 
-    char** args = malloc(sizeof(char*) * (count + 1));
-    args[0] = tokens.tokens[0].value; // command itself
-
-    int index = 1;
-    for(int i = 1; i < tokens.count; i++) {
-        if(tokens.tokens[i].type == TOKEN_ARGUMENT) {
-            args[index++] = tokens.tokens[i].value;
-        }
-    }
-    args[index] = NULL;
-
-    *out_count = count;
-    return args;
+    char* full_path = strcpy(malloc(dynbuf.len + 1), dynbuf.buf);
+    dynbuf_free(&dynbuf);
+    return full_path;
 }
 
-char* build_full_path(const char* directory, const char* command) {
-    char buf[1024];
-    snprintf(buf, sizeof(buf), "%s/%s", directory, command);
+void unknown_type(char* command) {
+    DynBuf dynbuf;
+    dynbuf_init(&dynbuf);
 
-    char* full_path = strcpy(malloc(strlen(buf) + 1), buf);
-    return full_path;
+    dynbuf_append(&dynbuf, command);
+    dynbuf_append(&dynbuf, ": not found\n");
+
+    write(1, dynbuf.buf, dynbuf.len);
+    dynbuf_free(&dynbuf);
 }
 
 void handle_home(char** path) {
     if((*path)[0] == '~') {
         const char* home = getenv("HOME");
         if(home) {
-            char buf[1024];
-            snprintf(buf, sizeof(buf), "%s%s", home, (*path) + 1);
+            DynBuf dynbuf;
+            dynbuf_init(&dynbuf);
+
+            dynbuf_append(&dynbuf, home);
+            dynbuf_append(&dynbuf, (*path) + 1);
+
             free(*path);
-            *path = strcpy(malloc(strlen(buf) + 1), buf);
+            *path = strcpy(malloc(strlen(dynbuf.buf) + 1), dynbuf.buf);
+
+            dynbuf_free(&dynbuf);
             return;
         }
         error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");

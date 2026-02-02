@@ -6,15 +6,22 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "dynbuf.h"
 #include "fs.h"
 
 int check_directory(const char* directory, const char* command) {
-    char full_path[1024];
-    snprintf(full_path, sizeof(full_path), "%s/%s", directory, command);
+    DynBuf dynbuf; 
+    dynbuf_init(&dynbuf);
 
-    if (access(full_path, X_OK) == 0) {
+    dynbuf_append(&dynbuf, directory);
+    dynbuf_append(&dynbuf, "/");
+    dynbuf_append(&dynbuf, command);
+
+    if (access(dynbuf.buf, X_OK) == 0) {
+        dynbuf_free(&dynbuf);
         return 1; 
     } else {
+        dynbuf_free(&dynbuf);
         return 0;
     }
 }

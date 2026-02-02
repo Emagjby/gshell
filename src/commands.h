@@ -1,11 +1,13 @@
 #ifndef COMMANDS_H_
 #define COMMANDS_H_
 
-void type_command(TokenArray* tokenArray);
+#include "argvec.h"
+
+void type_command(ArgVec argv);
 void clear_command(void);
-void echo_command(TokenArray* tokenArray);
-void run_command(TokenArray* tokenArray, char* path);
+void echo_command(ArgVec argv);
+void run_command(ArgVec argv, char* path);
 void pwd_command(void);
-void cd_command(TokenArray* tokenArray);
+void cd_command(ArgVec argv);
 
 #endif
