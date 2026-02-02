@@ -3,10 +3,11 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "tokenize.h"
-#include "execute.h"
+// #include "tokenize.h"
+// #include "execute.h"
 #include "helpers.h"
-#include "fs.h"
+#include "tokenizer.h"
+// #include "fs.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;
@@ -22,16 +23,15 @@ int main(int argc, char *argv[]) {
     if (input == NULL) {
       continue;
     }
-    
-    // Tokenize
-    TokenArray tokenArray;
-    tokenize(input, &tokenArray);
 
-    // Execute
-    execute(&tokenArray);
+    TokenArray tokenArray = tokenize(input);
+
+    // // Execute
+    // execute(&tokenArray);
 
     // Free resources
-    freeTokenArray(&tokenArray);
+    free_token_array(&tokenArray);
+    free(input);
   }
 
   clear_screen();

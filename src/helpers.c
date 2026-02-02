@@ -5,7 +5,6 @@
 
 #include "helpers.h"
 #include "error.h"
-#include "tokenize.h"
 
 void clear_screen(void) {
     write(1, "\033[2J\033[H", 7);
@@ -53,30 +52,6 @@ char* get_input(void){
     }
 
     return command;
-}
-
-char** decompose_args(TokenArray tokens, int* out_count) {
-    int count = 1; // include command itself
-
-    for(int i = 1; i < tokens.count; i++) {
-        if(tokens.tokens[i].type == TOKEN_ARGUMENT) {
-            count++;
-        }
-    }
-
-    char** args = malloc(sizeof(char*) * (count + 1));
-    args[0] = tokens.tokens[0].value; // command itself
-
-    int index = 1;
-    for(int i = 1; i < tokens.count; i++) {
-        if(tokens.tokens[i].type == TOKEN_ARGUMENT) {
-            args[index++] = tokens.tokens[i].value;
-        }
-    }
-    args[index] = NULL;
-
-    *out_count = count;
-    return args;
 }
 
 char* build_full_path(const char* directory, const char* command) {

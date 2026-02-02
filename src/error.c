@@ -17,7 +17,7 @@ void error_insufficient_arguments(const char* command) {
 
 void error_generic(const char* message, const char* details) {
     char buf[512];
-    int len = snprintf(buf, sizeof(buf), "%s\n\n\x1b[31m%s\x1b[0m\n", message, details);
+    int len = snprintf(buf, sizeof(buf), "%s\n\x1b[31m%s\x1b[0m\n\n", message, details);
     write(2, buf, len);
 }
 
@@ -40,6 +40,12 @@ void error(ErrorType errorType, const char* details) {
             break;
         case ERROR_ENVIRONMENT_VARIABLE_NOT_SET:
             error_generic("Environment variable not set: ", details);
+            break;
+        case ERROR_UNTERMINATED_QUOTE:
+            error_generic("Unterminated quote detected in input:", details);
+            break;
+        case ERROR_TOKENIZATION_FAILED:
+            error_generic("Tokenization failed:", details);
             break;
         default:
             error_generic("An unknown error occurred:", details);
