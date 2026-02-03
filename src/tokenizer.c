@@ -34,6 +34,18 @@ TokenType categorizeToken() {
   return TOKEN_TEXT;
 }
 
+/**
+ * Split an input string into tokens (text, whitespace, single-quoted and double-quoted)
+ * and return them as a TokenArray.
+ *
+ * @param input Null-terminated string to tokenize.
+ * @returns A TokenArray containing the parsed tokens; the array is terminated by a token
+ *          with type `TOKEN_EOL` and `value == NULL`.
+ *
+ * On encountering an unterminated single or double quote or an internal tokenization
+ * failure, the function frees any allocated tokens and reports an error via `error(...)`
+ * with `ERROR_UNTERMINATED_QUOTE` or `ERROR_TOKENIZATION_FAILED` respectively.
+ */
 TokenArray tokenize(const char* input) {
   int index = 0;
   while(input[index] == ' ') {
