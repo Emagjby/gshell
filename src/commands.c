@@ -83,15 +83,16 @@ void cd_command(ArgVec argv) {
   if (argv.count < 2) {
     char* home = getenv("HOME");
     if (home == NULL) {
-        error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
-        return;
+      free_argvec(&argv);
+      error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
+      return;
     }
     chdir(getenv("HOME"));
     return;
   }
 
   char* path = strcpy(malloc(strlen(argv.args[1]) + 1), argv.args[1]);
-  handle_home(&path);
+  handle_home(&path, &argv);
 
   if (chdir(path) != 0) {
     free_argvec(&argv);

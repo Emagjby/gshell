@@ -38,6 +38,7 @@ void execute(ArgVec argv) {
       return;
     }
 
+    free_argvec(&argv);
     error(ERROR_COMMAND_NOT_FOUND, argv.args[0]);
   }
 }
