@@ -96,6 +96,8 @@ void handle_home(char** path, ArgVec* argv) {
             return;
         }
 
+        free_argvec(argv);
+        free(*path);
         error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
     }
 }

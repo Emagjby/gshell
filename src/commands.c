@@ -85,9 +85,9 @@ void cd_command(ArgVec argv) {
     if (home == NULL) {
       free_argvec(&argv);
       error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
-      return;
     }
-    chdir(getenv("HOME"));
+    chdir(home);
+    free_argvec(&argv);
     return;
   }
 
