@@ -1,11 +1,12 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #include "panic.h"
 #include "error.h"
 #include "dynbuf.h"
 
-void error_command_not_found(const char* command) {
+void error_command_not_found(char* command) {
     DynBuf dynbuf;
     dynbuf_init(&dynbuf);
 
@@ -14,6 +15,7 @@ void error_command_not_found(const char* command) {
 
     write(2, dynbuf.buf, dynbuf.len);
     dynbuf_free(&dynbuf);
+    free(command);
 }
 
 void error_insufficient_arguments(const char* command) {
@@ -58,7 +60,7 @@ void error_no_such_directory(const char* directory) {
 void error(ErrorType errorType, const char* details) {
     switch (errorType) {
         case ERROR_COMMAND_NOT_FOUND:
-            error_command_not_found(details);
+            error_command_not_found((char*)details);
             break;
         case ERROR_INSUFFICIENT_ARGUMENTS:
             error_insufficient_arguments(details);

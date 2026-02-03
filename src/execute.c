@@ -38,7 +38,13 @@ void execute(ArgVec argv) {
       return;
     }
 
+    char* cmd_not_found = malloc(strlen(toExec) + 1);
+    if(!cmd_not_found) {
+      abort(); // Handle memory allocation failure
+    }
+    strcpy(cmd_not_found, toExec);
+
     free_argvec(&argv);
-    error(ERROR_COMMAND_NOT_FOUND, argv.args[0]);
+    error(ERROR_COMMAND_NOT_FOUND, cmd_not_found);
   }
 }
