@@ -5,6 +5,10 @@
 
 void dynbuf_init(DynBuf* dynbuf) {
     dynbuf->buf = (char*)malloc(256);
+    if(!dynbuf->buf) {
+        abort(); // Handle memory allocation failure
+    }
+
     dynbuf->len = 0;
     dynbuf->cap = 256;
 }
@@ -19,10 +23,11 @@ void dynbuf_free(DynBuf* dynbuf) {
 void double_dynbuf_capacity(DynBuf* dynbuf) {
     size_t new_cap = dynbuf->cap * 2;
     char* new_buf = (char*)realloc(dynbuf->buf, new_cap);
-    if (new_buf) {
-        dynbuf->buf = new_buf;
-        dynbuf->cap = new_cap;
+    if(!new_buf) {
+        abort(); // Handle memory allocation failure
     }
+    dynbuf->buf = new_buf;
+    dynbuf->cap = new_cap;
 }
 
 void dynbuf_append(DynBuf* dynbuf, const char* data) {
