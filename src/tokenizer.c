@@ -73,6 +73,32 @@ TokenArray tokenize(const char* input) {
 
       start = index + 1;
       continue;
+    } else if (input[index] == '"') {
+      index++;
+      start = index;
+      while(input[index] != '"' && input[index] != '\0') {
+        index++;
+      } // go to final '"'
+      if(input[index] == '\0') {
+        free_token_array(&tokenArray);
+        error(ERROR_UNTERMINATED_QUOTE, "Double quote not terminated");
+      }
+
+      // determine length
+      int length = index - start;
+
+      // build token
+      Token token;
+      token.value = malloc(length + 1);
+      strncpy(token.value, &input[start], length);
+      token.value[length] = '\0';
+      token.type = categorizeToken();
+
+      // append token
+      append_token(&tokenArray, token);      
+
+      start = index + 1;
+      continue;
     } else if (input[index] == ' ') {
       if (start != index) {
         // build  prev token
@@ -94,7 +120,8 @@ TokenArray tokenize(const char* input) {
     } else {
       while(input[index + 1] != ' ' 
             && input[index + 1] != '\0'
-            && input[index + 1] != '\'') {
+            && input[index + 1] != '\''
+            && input[index + 1] != '"') {
         index++;
       } // go to end of token
       
