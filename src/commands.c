@@ -6,17 +6,15 @@
 
 #include "fs.h"
 #include "argvec.h"
-#include "execute.h"
 #include "helpers.h"
 #include "commands.h"
 #include "error.h"
 #include "dynbuf.h"
 
 void type_command(ArgVec argv) {
-  // For now only supports a single argument
   if (argv.count < 2) {
-    error(ERROR_INSUFFICIENT_ARGUMENTS, argv.args[0]);
     free_argvec(&argv);
+    error(ERROR_INSUFFICIENT_ARGUMENTS, "type");
     return;
   }
 
@@ -85,19 +83,21 @@ void cd_command(ArgVec argv) {
   if (argv.count < 2) {
     char* home = getenv("HOME");
     if (home == NULL) {
-        error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
-        return;
+      free_argvec(&argv);
+      error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
     }
-    chdir(getenv("HOME"));
+    chdir(home);
+    free_argvec(&argv);
     return;
   }
 
   char* path = strcpy(malloc(strlen(argv.args[1]) + 1), argv.args[1]);
-  handle_home(&path);
+  handle_home(&path, &argv);
 
   if (chdir(path) != 0) {
     free_argvec(&argv);
     error(ERROR_CD_NO_SUCH_DIRECTORY, path);
   }
+  free(path);
   free_argvec(&argv);
 }

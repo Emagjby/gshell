@@ -1,6 +1,8 @@
 #ifndef DYNBUF_H_
 #define DYNBUF_H_
 
+#include <stddef.h>
+
 typedef struct {
     char* buf;
     size_t len;

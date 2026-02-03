@@ -4,8 +4,13 @@
 #include "argvec.h"
 
 void double_argvec_capacity(ArgVec* argv) {
-    argv->cap *= 2;
-    argv->args = realloc(argv->args, sizeof(char*) * argv->cap);
+    int new_cap = argv->cap ? argv->cap * 2 : 8;
+    char** new_args = realloc(argv->args, sizeof(char*) * new_cap);
+    if(!new_args) {
+        abort(); // Handle memory allocation failure
+    }
+    argv->args = new_args;
+    argv->cap = new_cap;
 }
 
 void append_arg(ArgVec* argv, const char* arg) {
@@ -13,7 +18,12 @@ void append_arg(ArgVec* argv, const char* arg) {
         double_argvec_capacity(argv);
     }
 
-    argv->args[argv->count++] = strcpy(malloc(strlen(arg) + 1), arg);
+    char* copy = malloc(strlen(arg) + 1);
+    if(!copy) {
+        abort(); // Handle memory allocation failure
+    }
+    strcpy(copy, arg);
+    argv->args[argv->count++] = copy;
 }
 
 void append_arg_end(ArgVec* argv) {

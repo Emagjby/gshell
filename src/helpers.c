@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "helpers.h"
+#include "argvec.h"
 #include "error.h"
 #include "dynbuf.h"
 
@@ -78,7 +79,7 @@ void unknown_type(char* command) {
     dynbuf_free(&dynbuf);
 }
 
-void handle_home(char** path) {
+void handle_home(char** path, ArgVec* argv) {
     if((*path)[0] == '~') {
         const char* home = getenv("HOME");
         if(home) {
@@ -94,6 +95,9 @@ void handle_home(char** path) {
             dynbuf_free(&dynbuf);
             return;
         }
+
+        free_argvec(argv);
+        free(*path);
         error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
     }
 }
