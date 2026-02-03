@@ -57,6 +57,9 @@ TokenArray tokenize(const char* input) {
   tokenArray.count = 0;
   tokenArray.cap = 8;
   tokenArray.tokens = malloc(sizeof(Token) * tokenArray.cap);
+  if(!tokenArray.tokens) {
+    abort(); // Handle memory allocation failure
+  }
 
   for(;input[index] != '\0'; index++) {
     if(input[index] == '\'') {
@@ -129,11 +132,33 @@ TokenArray tokenize(const char* input) {
 
       start = index + 1;
       continue; 
+    } else if (input[index] == '\\') {
+      // include next literal
+      index++; // consume '\'
+
+      if(input[index] == '\0') {
+        free_token_array(&tokenArray);
+        error(ERROR_TOKENIZATION_FAILED, "Escape character at end of input");
+      } else {
+        // build token
+        Token token;
+        token.value = malloc(2);
+        token.value[0] = input[index];
+        token.value[1] = '\0';
+        token.type = categorizeToken();
+
+        // append token
+        append_token(&tokenArray, token);
+
+        start = index + 1;
+        continue;
+      }
     } else {
       while(input[index + 1] != ' ' 
             && input[index + 1] != '\0'
             && input[index + 1] != '\''
-            && input[index + 1] != '"') {
+            && input[index + 1] != '"'
+            && input[index + 1] != '\\') {
         index++;
       } // go to end of token
       
