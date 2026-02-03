@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "tokenizer.h"
+#include "dynbuf.h"
 #include "error.h"
 
 void free_token_array(TokenArray* tokenArray) {
@@ -34,6 +35,51 @@ TokenType categorizeToken() {
   return TOKEN_TEXT;
 }
 
+char* postprocess_dq(char* arg) {
+  int read_index = 0;
+
+  DynBuf dynbuf;
+  dynbuf_init(&dynbuf);
+
+  while(arg[read_index] != '\0') {
+    if(arg[read_index] == '\\') {
+      read_index++;
+      switch(arg[read_index]) {
+        case '"':
+          dynbuf_append(&dynbuf, "\"");
+          break;
+        case '\\':
+          dynbuf_append(&dynbuf, "\\");
+          break;
+        default: {
+          // unrecognized escape, treat literally
+          char temp[3] = {'\\', arg[read_index], '\0'};
+          dynbuf_append(&dynbuf, temp);
+          break;
+        }
+      }
+    } else {
+      char temp[2] = {arg[read_index], '\0'};
+      dynbuf_append(&dynbuf, temp);
+    }
+    read_index++;
+  }
+
+  // allocate processed string
+  char* processed = malloc(dynbuf.len + 1);
+  if(!processed) {
+    abort(); // Handle memory allocation failure
+  }
+  memcpy(processed, dynbuf.buf, dynbuf.len);
+  processed[dynbuf.len] = '\0';
+
+  // free dynamic buffer and original arg
+  dynbuf_free(&dynbuf);
+  free(arg);
+
+  return processed;
+}
+
 /**
  * Split an input string into tokens (text, whitespace)
  * and return them as a TokenArray.
@@ -57,6 +103,9 @@ TokenArray tokenize(const char* input) {
   tokenArray.count = 0;
   tokenArray.cap = 8;
   tokenArray.tokens = malloc(sizeof(Token) * tokenArray.cap);
+  if(!tokenArray.tokens) {
+    abort(); // Handle memory allocation failure
+  }
 
   for(;input[index] != '\0'; index++) {
     if(input[index] == '\'') {
@@ -76,6 +125,9 @@ TokenArray tokenize(const char* input) {
       // build token
       Token token;
       token.value = malloc(length + 1);
+      if(!token.value) {
+        abort(); // Handle memory allocation failure
+      }
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
       token.type = categorizeToken();
@@ -89,6 +141,13 @@ TokenArray tokenize(const char* input) {
       index++;
       start = index;
       while(input[index] != '"' && input[index] != '\0') {
+        if(input[index] == '\\') {
+          index++; // skip escape character
+          if(input[index] == '\0') {
+            free_token_array(&tokenArray);
+            error(ERROR_UNTERMINATED_QUOTE, "Double quote not terminated after escape");
+          }
+        }
         index++;
       } // go to final '"'
       if(input[index] == '\0') {
@@ -96,18 +155,31 @@ TokenArray tokenize(const char* input) {
         error(ERROR_UNTERMINATED_QUOTE, "Double quote not terminated");
       }
 
-      // determine length
+      // postprocess token for escape sequences
       int length = index - start;
+      char* arg = malloc(length + 1);
+      if(!arg) {
+        abort(); // Handle memory allocation failure
+      }
+      strncpy(arg, &input[start], length);
+      char* token_value = postprocess_dq(arg);
+
+      // determine length
+      length = strlen(token_value);
 
       // build token
       Token token;
       token.value = malloc(length + 1);
-      strncpy(token.value, &input[start], length);
-      token.value[length] = '\0';
+      if(!token.value) {
+        abort(); // Handle memory allocation failure
+      }
+      strcpy(token.value, token_value);
       token.type = categorizeToken();
 
       // append token
       append_token(&tokenArray, token);      
+
+      free(token_value);
 
       start = index + 1;
       continue;
@@ -129,11 +201,36 @@ TokenArray tokenize(const char* input) {
 
       start = index + 1;
       continue; 
+    } else if (input[index] == '\\') {
+      // include next literal
+      index++; // consume '\'
+
+      if(input[index] == '\0') {
+        free_token_array(&tokenArray);
+        error(ERROR_TOKENIZATION_FAILED, "Escape character at end of input");
+      } else {
+        // build token
+        Token token;
+        token.value = malloc(2);
+        if(!token.value) {
+          abort(); // Handle memory allocation failure
+        }
+        token.value[0] = input[index];
+        token.value[1] = '\0';
+        token.type = categorizeToken();
+
+        // append token
+        append_token(&tokenArray, token);
+
+        start = index + 1;
+        continue;
+      }
     } else {
       while(input[index + 1] != ' ' 
             && input[index + 1] != '\0'
             && input[index + 1] != '\''
-            && input[index + 1] != '"') {
+            && input[index + 1] != '"'
+            && input[index + 1] != '\\') {
         index++;
       } // go to end of token
       
@@ -143,6 +240,9 @@ TokenArray tokenize(const char* input) {
       // build token
       Token token;
       token.value = malloc(length + 1);
+      if(!token.value) {
+        abort(); // Handle memory allocation failure
+      }
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
       token.type = categorizeToken();
