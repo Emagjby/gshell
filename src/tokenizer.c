@@ -35,7 +35,7 @@ TokenType categorizeToken() {
 }
 
 /**
- * Split an input string into tokens (text, whitespace, single-quoted and double-quoted)
+ * Split an input string into tokens (text, whitespace)
  * and return them as a TokenArray.
  *
  * @param input Null-terminated string to tokenize.
