@@ -37,6 +37,9 @@ ArgVec parse(TokenArray tokens) {
     argv.count = 0;
     argv.cap = 8;
     argv.args = malloc(sizeof(char*) * argv.cap);
+    if(!argv.args) {
+        abort(); // Handle memory allocation failure
+    }
 
     int index = 0;
     int start = index;

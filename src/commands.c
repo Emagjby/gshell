@@ -98,5 +98,6 @@ void cd_command(ArgVec argv) {
     free_argvec(&argv);
     error(ERROR_CD_NO_SUCH_DIRECTORY, path);
   }
+  free(path);
   free_argvec(&argv);
 }
