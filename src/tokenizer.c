@@ -35,46 +35,49 @@ TokenType categorizeToken() {
   return TOKEN_TEXT;
 }
 
-void postprocess_dq_token(char* token) {
+char* postprocess_dq(char* arg) {
   int read_index = 0;
 
   DynBuf dynbuf;
   dynbuf_init(&dynbuf);
 
-  while(token[read_index] != '\0') {
-    if(token[read_index] == '\\') {
-      read_index++; // consume '\'
-      if(token[read_index] == '\\') {
-        dynbuf_append(&dynbuf, "\\");
-        read_index++;
-      } else if (token[read_index] == '"') {
-        dynbuf_append(&dynbuf, "\"");
-        read_index++;
-      } else {
-        // unrecognized escape, treat literally
-        dynbuf_append(&dynbuf, "\\");
-        if(token[read_index] != '\0') {
-          char temp[2] = {token[read_index], '\0'};
+  while(arg[read_index] != '\0') {
+    if(arg[read_index] == '\\') {
+      read_index++;
+      switch(arg[read_index]) {
+        case '"':
+          dynbuf_append(&dynbuf, "\"");
+          break;
+        case '\\':
+          dynbuf_append(&dynbuf, "\\");
+          break;
+        default: {
+          // unrecognized escape, treat literally
+          char temp[3] = {'\\', arg[read_index], '\0'};
           dynbuf_append(&dynbuf, temp);
-          read_index++;
+          break;
         }
       }
     } else {
-      char temp[2] = {token[read_index], '\0'};
+      char temp[2] = {arg[read_index], '\0'};
       dynbuf_append(&dynbuf, temp);
-      read_index++;
     }
+    read_index++;
   }
 
-  // finalize processed token
-  free(token);
-  token = malloc(dynbuf.len + 1);
-  if(!token) {
+  // allocate processed string
+  char* processed = malloc(dynbuf.len + 1);
+  if(!processed) {
     abort(); // Handle memory allocation failure
   }
-  memcpy(token, dynbuf.buf, dynbuf.len);
-  token[dynbuf.len] = '\0';
+  memcpy(processed, dynbuf.buf, dynbuf.len);
+  processed[dynbuf.len] = '\0';
+
+  // free dynamic buffer and original arg
   dynbuf_free(&dynbuf);
+  free(arg);
+
+  return processed;
 }
 
 /**
@@ -122,6 +125,9 @@ TokenArray tokenize(const char* input) {
       // build token
       Token token;
       token.value = malloc(length + 1);
+      if(!token.value) {
+        abort(); // Handle memory allocation failure
+      }
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
       token.type = categorizeToken();
@@ -149,21 +155,31 @@ TokenArray tokenize(const char* input) {
         error(ERROR_UNTERMINATED_QUOTE, "Double quote not terminated");
       }
 
-      // determine length
+      // postprocess token for escape sequences
       int length = index - start;
+      char* arg = malloc(length + 1);
+      if(!arg) {
+        abort(); // Handle memory allocation failure
+      }
+      strncpy(arg, &input[start], length);
+      char* token_value = postprocess_dq(arg);
+
+      // determine length
+      length = strlen(token_value);
 
       // build token
       Token token;
       token.value = malloc(length + 1);
-      strncpy(token.value, &input[start], length);
-      token.value[length] = '\0';
+      if(!token.value) {
+        abort(); // Handle memory allocation failure
+      }
+      strcpy(token.value, token_value);
       token.type = categorizeToken();
-
-      // postprocess token for escape sequences
-      postprocess_dq_token(token.value);
 
       // append token
       append_token(&tokenArray, token);      
+
+      free(token_value);
 
       start = index + 1;
       continue;
@@ -196,6 +212,9 @@ TokenArray tokenize(const char* input) {
         // build token
         Token token;
         token.value = malloc(2);
+        if(!token.value) {
+          abort(); // Handle memory allocation failure
+        }
         token.value[0] = input[index];
         token.value[1] = '\0';
         token.type = categorizeToken();
@@ -221,6 +240,9 @@ TokenArray tokenize(const char* input) {
       // build token
       Token token;
       token.value = malloc(length + 1);
+      if(!token.value) {
+        abort(); // Handle memory allocation failure
+      }
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
       token.type = categorizeToken();
