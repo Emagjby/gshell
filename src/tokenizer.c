@@ -14,12 +14,13 @@ void free_token_array(TokenArray* tokenArray) {
 }
 
 void double_token_array_capacity(TokenArray* tokenArray) {
-  tokenArray->cap *= 2;
-  Token* new_tokens = realloc(tokenArray->tokens, sizeof(Token) * tokenArray->cap);
+  int new_cap = tokenArray->cap * 2;
+  Token* new_tokens = realloc(tokenArray->tokens, sizeof(Token) * new_cap);
   if(!new_tokens) {
     abort(); // Handle memory allocation failure
   }
   tokenArray->tokens = new_tokens;
+  tokenArray->cap = new_cap;
 }
 
 void append_token(TokenArray* tokenArray, Token token) {

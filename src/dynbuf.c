@@ -20,7 +20,7 @@ void dynbuf_free(DynBuf* dynbuf) {
     dynbuf->cap = 0;
 }
 
-void double_dynbuf_capacity(DynBuf* dynbuf) {
+static void double_dynbuf_capacity(DynBuf* dynbuf) {
     size_t new_cap = dynbuf->cap * 2;
     char* new_buf = (char*)realloc(dynbuf->buf, new_cap);
     if(!new_buf) {
