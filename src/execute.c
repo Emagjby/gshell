@@ -7,6 +7,10 @@
 #include "commands.h"
 
 void execute(ArgVec argv) {
+  if(argv.count == 0 || argv.args == NULL || argv.args[0] == NULL) {
+    free_argvec(&argv);
+    return;
+  }
   char* toExec = argv.args[0]; 
 
   if(strcmp(toExec, "exit") == 0) {
@@ -15,10 +19,14 @@ void execute(ArgVec argv) {
     echo_command(argv);
   } else if (strcmp(toExec, "clear") == 0) {
     clear_command();
+    free_argvec(&argv);
+    return;
   } else if (strcmp(toExec, "type") == 0) {
     type_command(argv);
   } else if (strcmp(toExec, "pwd") == 0) {
     pwd_command();
+    free_argvec(&argv);
+    return;
   } else if (strcmp(toExec, "cd") == 0) {
     cd_command(argv);
   } else {
