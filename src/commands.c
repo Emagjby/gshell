@@ -6,17 +6,15 @@
 
 #include "fs.h"
 #include "argvec.h"
-#include "execute.h"
 #include "helpers.h"
 #include "commands.h"
 #include "error.h"
 #include "dynbuf.h"
 
 void type_command(ArgVec argv) {
-  // For now only supports a single argument
   if (argv.count < 2) {
-    error(ERROR_INSUFFICIENT_ARGUMENTS, argv.args[0]);
     free_argvec(&argv);
+    error(ERROR_INSUFFICIENT_ARGUMENTS, "type");
     return;
   }
 
