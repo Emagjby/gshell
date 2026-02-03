@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "tokenizer.h"
+#include "dynbuf.h"
 #include "error.h"
 
 void free_token_array(TokenArray* tokenArray) {
@@ -32,6 +33,48 @@ void append_token(TokenArray* tokenArray, Token token) {
 
 TokenType categorizeToken() {
   return TOKEN_TEXT;
+}
+
+void postprocess_dq_token(char* token) {
+  int read_index = 0;
+
+  DynBuf dynbuf;
+  dynbuf_init(&dynbuf);
+
+  while(token[read_index] != '\0') {
+    if(token[read_index] == '\\') {
+      read_index++; // consume '\'
+      if(token[read_index] == '\\') {
+        dynbuf_append(&dynbuf, "\\");
+        read_index++;
+      } else if (token[read_index] == '"') {
+        dynbuf_append(&dynbuf, "\"");
+        read_index++;
+      } else {
+        // unrecognized escape, treat literally
+        dynbuf_append(&dynbuf, "\\");
+        if(token[read_index] != '\0') {
+          char temp[2] = {token[read_index], '\0'};
+          dynbuf_append(&dynbuf, temp);
+          read_index++;
+        }
+      }
+    } else {
+      char temp[2] = {token[read_index], '\0'};
+      dynbuf_append(&dynbuf, temp);
+      read_index++;
+    }
+  }
+
+  // finalize processed token
+  free(token);
+  token = malloc(dynbuf.len + 1);
+  if(!token) {
+    abort(); // Handle memory allocation failure
+  }
+  memcpy(token, dynbuf.buf, dynbuf.len);
+  token[dynbuf.len] = '\0';
+  dynbuf_free(&dynbuf);
 }
 
 /**
@@ -92,6 +135,13 @@ TokenArray tokenize(const char* input) {
       index++;
       start = index;
       while(input[index] != '"' && input[index] != '\0') {
+        if(input[index] == '\\') {
+          index++; // skip escape character
+          if(input[index] == '\0') {
+            free_token_array(&tokenArray);
+            error(ERROR_UNTERMINATED_QUOTE, "Double quote not terminated after escape");
+          }
+        }
         index++;
       } // go to final '"'
       if(input[index] == '\0') {
@@ -108,6 +158,9 @@ TokenArray tokenize(const char* input) {
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
       token.type = categorizeToken();
+
+      // postprocess token for escape sequences
+      postprocess_dq_token(token.value);
 
       // append token
       append_token(&tokenArray, token);      
