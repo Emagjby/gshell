@@ -162,6 +162,7 @@ TokenArray tokenize(const char* input) {
         abort(); // Handle memory allocation failure
       }
       strncpy(arg, &input[start], length);
+      arg[length] = '\0';
       char* token_value = postprocess_dq(arg);
 
       // determine length
@@ -200,7 +201,7 @@ TokenArray tokenize(const char* input) {
       append_token(&tokenArray, token);
 
       start = index + 1;
-      continue; 
+      continue;
     } else if (input[index] == '\\') {
       // include next literal
       index++; // consume '\'
