@@ -20,6 +20,9 @@ char* build_argument(TokenArray* tokens, int start, int end) {
 
     // allocate argument string
     char* arg = malloc(dynbuf.len + 1);
+    if(!arg) {
+        abort(); // Handle memory allocation failure
+    }
     memcpy(arg, dynbuf.buf, dynbuf.len);
     arg[dynbuf.len] = '\0';
     
@@ -65,6 +68,13 @@ ArgVec parse(TokenArray tokens) {
             continue;
         }
     } 
+
+    // Handle last argument if any (just in case no trailing eol, which shouldn't happen)
+    if (start < index) {
+        char* arg = build_argument(&tokens, start, index);
+        append_arg(&argv, arg);
+        free(arg);
+    }
 
     // Null-terminate the argument list
     append_arg_end(&argv);
