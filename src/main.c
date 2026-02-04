@@ -17,11 +17,20 @@ int main(int argc, char *argv[]) {
   setbuf(stdout, NULL);
 
   clear_screen();
+
+  static struct {
+    char* input;
+    TokenArray tokenArray;
+    Command command;
+    int saved_stdout;
+  } state;
+
   for(;;) {
     // prepare state
-    char* input = NULL;
-    TokenArray tokenArray = {0};
-    Command command = {0};
+    state.input = NULL;
+    state.tokenArray = (TokenArray){0};
+    state.command = (Command){0};
+    state.saved_stdout = -1;
 
     // set panic recovery point
     if(setjmp(panic_env) != 0) {
@@ -31,33 +40,31 @@ int main(int argc, char *argv[]) {
     write_prompt();
 
     // get input
-    input = get_input();
-    if(!input) {
+    state.input = get_input();
+    if(!state.input) {
       goto cleanup;
     }
 
     // process input
-    tokenArray = tokenize(input);
-    command = parse(tokenArray);
+    state.tokenArray = tokenize(state.input);
+    state.command = parse(state.tokenArray);
 
-    // handle redirection 
-    int saved_stdout = -1;
-
-    if(command.stdout_path) {
-      saved_stdout = redirect_stdout(command.stdout_path);
+    // handle redirections
+    if(state.command.stdout_path) {
+      state.saved_stdout = redirect_stdout(state.command.stdout_path);
     }
 
     // execute command
-    execute(&command);
+    execute(&state.command);
 
 cleanup:
-    if(saved_stdout != -1) {
-      restore_stdout(saved_stdout);
+    if(state.saved_stdout != -1) {
+      restore_stdout(state.saved_stdout);
     }
 
-    free(input);
-    free_token_array(&tokenArray);
-    free_command(&command);
+    free(state.input);
+    free_token_array(&state.tokenArray);
+    free_command(&state.command);
   }
 
   clear_screen();
