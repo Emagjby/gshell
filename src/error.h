@@ -8,6 +8,8 @@ typedef enum {
     ERROR_ENVIRONMENT_VARIABLE_NOT_SET,
     ERROR_TOKENIZATION_FAILED,
     ERROR_UNTERMINATED_QUOTE,
+    ERROR_PARSING_FAILED,
+    ERROR_FILE_OPERATION_FAILED,
 } ErrorType;
 
 void error(ErrorType errorType, const char* details);

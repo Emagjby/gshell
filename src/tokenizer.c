@@ -31,10 +31,6 @@ void append_token(TokenArray* tokenArray, Token token) {
   tokenArray->tokens[tokenArray->count++] = token;
 }
 
-TokenType categorizeToken() {
-  return TOKEN_TEXT;
-}
-
 char* postprocess_dq(char* arg) {
   int read_index = 0;
 
@@ -80,18 +76,6 @@ char* postprocess_dq(char* arg) {
   return processed;
 }
 
-/**
- * Split an input string into tokens (text, whitespace)
- * and return them as a TokenArray.
- *
- * @param input Null-terminated string to tokenize.
- * @returns A TokenArray containing the parsed tokens; the array is terminated by a token
- *          with type `TOKEN_EOL` and `value == NULL`.
- *
- * On encountering an unterminated single or double quote or an internal tokenization
- * failure, the function frees any allocated tokens and reports an error via `error(...)`
- * with `ERROR_UNTERMINATED_QUOTE` or `ERROR_TOKENIZATION_FAILED` respectively.
- */
 TokenArray tokenize(const char* input) {
   int index = 0;
   while(input[index] == ' ') {
@@ -108,6 +92,53 @@ TokenArray tokenize(const char* input) {
   }
 
   for(;input[index] != '\0'; index++) {
+    // first check for special tokens
+    if(input[index] == '>') {
+      // build redirect token
+      Token token;
+      token.value = malloc(2);
+      if(!token.value) {
+        abort(); // Handle memory allocation failure
+      }
+      token.value[0] = '>';
+      token.value[1] = '\0';
+      token.type = TOKEN_REDIRECT_OUT;
+
+      // append token
+      append_token(&tokenArray, token);
+
+      start = index + 1;
+      continue;
+    }
+    if(input[index] >= '0' && input[index] <= '9' && index == start) {
+      int temp_index = index + 1;
+
+      while(input[temp_index] >= '0' && input[temp_index] <= '9' && input[temp_index] != '\0') {
+        temp_index++;
+      }
+
+      if(input[temp_index] == '>') {
+        // build redirect token
+        int length = temp_index - index + 1;
+        Token token;
+        token.value = malloc(length + 1);
+        if(!token.value) {
+          abort(); // Handle memory allocation failure
+        }
+        strncpy(token.value, &input[index], length);
+        token.value[length] = '\0';
+        token.type = TOKEN_REDIRECT_OUT;
+
+        // append token
+        append_token(&tokenArray, token);
+
+        index = temp_index; // advance main index
+        start = index + 1;
+        continue;
+      }
+    }
+
+    // otherwise, process normal tokens
     if(input[index] == '\'') {
       index++;
       start = index;
@@ -115,7 +146,6 @@ TokenArray tokenize(const char* input) {
         index++;
       } // go to final ''\'
       if(input[index] == '\0') {
-        free_token_array(&tokenArray);
         error(ERROR_UNTERMINATED_QUOTE, "Single quote not terminated");
       }
 
@@ -130,7 +160,7 @@ TokenArray tokenize(const char* input) {
       }
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
-      token.type = categorizeToken();
+      token.type = TOKEN_TEXT;
 
       // append token
       append_token(&tokenArray, token);      
@@ -144,14 +174,12 @@ TokenArray tokenize(const char* input) {
         if(input[index] == '\\') {
           index++; // skip escape character
           if(input[index] == '\0') {
-            free_token_array(&tokenArray);
             error(ERROR_UNTERMINATED_QUOTE, "Double quote not terminated after escape");
           }
         }
         index++;
       } // go to final '"'
       if(input[index] == '\0') {
-        free_token_array(&tokenArray);
         error(ERROR_UNTERMINATED_QUOTE, "Double quote not terminated");
       }
 
@@ -175,7 +203,7 @@ TokenArray tokenize(const char* input) {
         abort(); // Handle memory allocation failure
       }
       strcpy(token.value, token_value);
-      token.type = categorizeToken();
+      token.type = TOKEN_TEXT;
 
       // append token
       append_token(&tokenArray, token);      
@@ -207,7 +235,6 @@ TokenArray tokenize(const char* input) {
       index++; // consume '\'
 
       if(input[index] == '\0') {
-        free_token_array(&tokenArray);
         error(ERROR_TOKENIZATION_FAILED, "Escape character at end of input");
       } else {
         // build token
@@ -218,7 +245,7 @@ TokenArray tokenize(const char* input) {
         }
         token.value[0] = input[index];
         token.value[1] = '\0';
-        token.type = categorizeToken();
+        token.type = TOKEN_TEXT;
 
         // append token
         append_token(&tokenArray, token);
@@ -231,7 +258,8 @@ TokenArray tokenize(const char* input) {
             && input[index + 1] != '\0'
             && input[index + 1] != '\''
             && input[index + 1] != '"'
-            && input[index + 1] != '\\') {
+            && input[index + 1] != '\\'
+            && input[index + 1] != '>') {
         index++;
       } // go to end of token
       
@@ -246,7 +274,7 @@ TokenArray tokenize(const char* input) {
       }
       strncpy(token.value, &input[start], length);
       token.value[length] = '\0';
-      token.type = categorizeToken();
+      token.type = TOKEN_TEXT;
 
       // append token
       append_token(&tokenArray, token);
@@ -255,7 +283,6 @@ TokenArray tokenize(const char* input) {
       continue;
     }
 
-    free_token_array(&tokenArray);
     error(ERROR_TOKENIZATION_FAILED, "An unknown tokenization error occurred");
   }
 

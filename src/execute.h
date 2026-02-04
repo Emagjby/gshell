@@ -1,8 +1,8 @@
 #ifndef EXECUTE_H_
 #define EXECUTE_H_
 
-#include "argvec.h"
+#include "command.h"
 
-void execute(ArgVec argv);
+void execute(Command* command);
 
 #endif

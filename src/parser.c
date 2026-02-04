@@ -5,6 +5,7 @@
 #include "parser.h"
 #include "argvec.h"
 #include "tokenizer.h"
+#include "error.h"
 #include "dynbuf.h"
 
 char* build_argument(TokenArray* tokens, int start, int end) {
@@ -32,7 +33,7 @@ char* build_argument(TokenArray* tokens, int start, int end) {
     return arg;
 }
 
-ArgVec parse(TokenArray tokens) {
+Command parse(TokenArray tokens) {
     ArgVec argv;
     argv.count = 0;
     argv.cap = 8;
@@ -41,11 +42,55 @@ ArgVec parse(TokenArray tokens) {
         abort(); // Handle memory allocation failure
     }
 
+    Command command;
+    command.stdout_path = NULL;
+    command.stdout_append = NULL;
+
     int index = 0;
     int start = index;
 
     for (; index < tokens.count; index++){
         Token token = tokens.tokens[index];
+
+        if(token.type == TOKEN_REDIRECT_OUT) {
+            if (start < index) {
+                char* arg = build_argument(&tokens, start, index);
+                append_arg(&argv, arg);
+                free(arg);
+            }
+
+            // find next non-whitespace token for path
+            int path_index = index + 1;
+            while(path_index < tokens.count && tokens.tokens[path_index].type == TOKEN_WHITESPACE) {
+                path_index++;
+            }
+            if(path_index >= tokens.count || tokens.tokens[path_index].type != TOKEN_TEXT) {
+                error(ERROR_PARSING_FAILED, "Expected file path after redirect operator");
+            }
+
+            Token path_token = tokens.tokens[path_index];
+
+            // set stdout_path in command
+            char* path = malloc(strlen(path_token.value) + 1);
+            if(!path) {
+                abort(); // Handle memory allocation failure
+            }
+            strcpy(path, path_token.value);
+
+            // advance index to skip path token
+            index = path_index;
+
+            // store redirect info in command
+            if(command.stdout_path) {
+                free(command.stdout_path); 
+                command.stdout_path = NULL;
+            }
+            command.stdout_path = path;
+
+            // update start to next token
+            start = index + 1; // skip whitespace token
+            continue;
+        }
 
         if(token.type == TOKEN_WHITESPACE || token.type == TOKEN_EOL) {
             if(start == index) {
@@ -82,6 +127,7 @@ ArgVec parse(TokenArray tokens) {
     // Null-terminate the argument list
     append_arg_end(&argv);
 
-    free_token_array(&tokens);
-    return argv;
+    command.argv = argv;
+
+    return command;
 }
