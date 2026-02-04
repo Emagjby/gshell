@@ -67,6 +67,9 @@ void error(ErrorType errorType, const char* details) {
         case ERROR_CD_NO_SUCH_DIRECTORY:
             error_no_such_directory((char*)details);
             break;
+        case ERROR_PARSING_FAILED:
+            error_generic("Parsing failed:", details);
+            break;
         case ERROR_ENVIRONMENT_VARIABLE_NOT_SET:
             error_generic("Environment variable not set: ", details);
             break;

@@ -5,6 +5,7 @@
 #include "parser.h"
 #include "argvec.h"
 #include "tokenizer.h"
+#include "error.h"
 #include "dynbuf.h"
 
 char* build_argument(TokenArray* tokens, int start, int end) {
@@ -41,11 +42,44 @@ Command parse(TokenArray tokens) {
         abort(); // Handle memory allocation failure
     }
 
+    Command command;
+    command.stdout_path = NULL;
+    command.stdout_append = NULL;
+
     int index = 0;
     int start = index;
 
     for (; index < tokens.count; index++){
         Token token = tokens.tokens[index];
+
+        if(token.type == TOKEN_REDIRECT_OUT) {
+            // next token should be the file path
+            if(index + 1 >= tokens.count) {
+                error(ERROR_PARSING_FAILED, "Expected file path after redirect operator");
+            }
+
+            Token path_token = tokens.tokens[index + 2]; // skip whitespace token
+            if(path_token.type != TOKEN_TEXT) {
+                error(ERROR_PARSING_FAILED, "Expected file path after redirect operator");
+            }
+
+            // set stdout_path in command
+            char* path = malloc(strlen(path_token.value) + 1);
+            if(!path) {
+                abort(); // Handle memory allocation failure
+            }
+            strcpy(path, path_token.value);
+
+            // advance index to skip path token
+            index++;
+
+            // store redirect info in command
+            command.stdout_path = path;
+
+            // update start to next token
+            start = index + 2; // skip whitespace token
+            continue;
+        }
 
         if(token.type == TOKEN_WHITESPACE || token.type == TOKEN_EOL) {
             if(start == index) {
@@ -82,10 +116,7 @@ Command parse(TokenArray tokens) {
     // Null-terminate the argument list
     append_arg_end(&argv);
 
-    Command command;
     command.argv = argv;
-    command.stdout_path = NULL;
-    command.stdout_append = NULL;
 
     return command;
 }
