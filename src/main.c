@@ -16,33 +16,35 @@ int main(int argc, char *argv[]) {
 
   clear_screen();
   for(;;) {
+    // prepare state
+    char* input = NULL;
+    TokenArray tokenArray = {0};
+    Command command = {0};
 
-    // write prompt
+    // set panic recovery point
+    if(setjmp(panic_env) != 0) {
+      goto cleanup;
+    }
+
     write_prompt();
 
-    // Read user input 
-    char* input = get_input();
-    if (input == NULL) {
-      continue;
+    // get input
+    input = get_input();
+    if(!input) {
+      goto cleanup;
     }
 
-    // Tokenize
-    TokenArray tokenArray = tokenize(input);
-
+    // process input & execute
+    tokenArray = tokenize(input);
     for(int i = 0; i < tokenArray.count; i++) {
-      // Uncomment the following line to debug tokens
-      printf("Token %d: Type=%d, Value='%s'\n", i, tokenArray.tokens[i].type, tokenArray.tokens[i].value ? tokenArray.tokens[i].value : "NULL");
+      printf("Token %d: Type %d, Value '%s'\n", i, tokenArray.tokens[i].type, tokenArray.tokens[i].value ? tokenArray.tokens[i].value : "NULL");
     }
-
-    // Parse
-    Command command = parse(tokenArray);
-
-    // Execute
+    command = parse(tokenArray);
     execute(&command);
 
-    // Free resources
-    if(setjmp(panic_env)) { continue; } // recover from panic
+cleanup:
     free(input);
+    free_token_array(&tokenArray);
     free_command(&command);
   }
 

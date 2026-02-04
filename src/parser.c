@@ -87,6 +87,5 @@ Command parse(TokenArray tokens) {
     command.stdout_path = NULL;
     command.stdout_append = NULL;
 
-    free_token_array(&tokens);
     return command;
 }
