@@ -110,11 +110,13 @@ int redirect_stdout(const char* path) {
 
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
+        close(saved_stdout);
         error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
     }
 
     if(dup2(fd, STDOUT_FILENO) < 0) {
         close(fd);
+        close(saved_stdout);
         error(ERROR_FILE_OPERATION_FAILED, "Failed to redirect stdout");
     }
 

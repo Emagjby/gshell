@@ -81,6 +81,10 @@ Command parse(TokenArray tokens) {
             index = path_index;
 
             // store redirect info in command
+            if(command.stdout_path) {
+                free(command.stdout_path); 
+                command.stdout_path = NULL;
+            }
             command.stdout_path = path;
 
             // update start to next token
