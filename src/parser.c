@@ -53,6 +53,12 @@ Command parse(TokenArray tokens) {
         Token token = tokens.tokens[index];
 
         if(token.type == TOKEN_REDIRECT_OUT) {
+            if (start < index) {
+                char* arg = build_argument(&tokens, start, index);
+                append_arg(&argv, arg);
+                free(arg);
+            }
+
             // find next non-whitespace token for path
             int path_index = index + 1;
             while(path_index < tokens.count && tokens.tokens[path_index].type == TOKEN_WHITESPACE) {

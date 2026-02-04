@@ -94,10 +94,6 @@ TokenArray tokenize(const char* input) {
   for(;input[index] != '\0'; index++) {
     // first check for special tokens
     if(input[index] == '>') {
-      if(input[index + 1] != ' ' && input[index + 1] != '\0') {
-        error(ERROR_TOKENIZATION_FAILED, "Expected space after redirect operator");
-      }
-
       // build redirect token
       Token token;
       token.value = malloc(2);
@@ -114,7 +110,7 @@ TokenArray tokenize(const char* input) {
       start = index + 1;
       continue;
     }
-    if(input[index] >= '0' && input[index] <= '9') {
+    if(input[index] >= '0' && input[index] <= '9' && index == start) {
       int temp_index = index + 1;
 
       while(input[temp_index] >= '0' && input[temp_index] <= '9' && input[temp_index] != '\0') {
@@ -122,10 +118,6 @@ TokenArray tokenize(const char* input) {
       }
 
       if(input[temp_index] == '>') {
-        if(input[temp_index + 1] != ' ' && input[temp_index + 1] != '\0') {
-          error(ERROR_TOKENIZATION_FAILED, "Expected space after redirect operator");
-        }
-
         // build redirect token
         int length = temp_index - index + 1;
         Token token;
@@ -266,7 +258,8 @@ TokenArray tokenize(const char* input) {
             && input[index + 1] != '\0'
             && input[index + 1] != '\''
             && input[index + 1] != '"'
-            && input[index + 1] != '\\') {
+            && input[index + 1] != '\\'
+            && input[index + 1] != '>') {
         index++;
       } // go to end of token
       
