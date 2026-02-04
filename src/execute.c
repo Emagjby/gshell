@@ -14,10 +14,6 @@ void execute(Command* command) {
   }
   char* toExec = argv.args[0]; 
 
-  if(command->stdout_path) {
-    redirect_stdout(command->stdout_path);
-  }
-
   if(strcmp(toExec, "exit") == 0) {
     exit(0);
   } else if (strcmp(toExec, "echo") == 0) {

@@ -102,17 +102,31 @@ void run_program(const char* path, char** argv){
     }
 }
 
-void redirect_stdout(const char* path) {
+int redirect_stdout(const char* path) {
+    int saved_stdout = dup(STDOUT_FILENO);
+    if(saved_stdout < 0){
+      error(ERROR_FILE_OPERATION_FAILED, "Failed to save stdout");
+    }
+
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
         error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
     }
 
-    dup2(fd, STDOUT_FILENO);
+    if(dup2(fd, STDOUT_FILENO) < 0) {
+        close(fd);
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to redirect stdout");
+    }
+
     close(fd);
+    return saved_stdout;
 }
 
 void restore_stdout(int saved_stdout) {
-    dup2(saved_stdout, STDOUT_FILENO);
+    if(dup2(saved_stdout, STDOUT_FILENO) < 0) {
+        close(saved_stdout);
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to restore stdout");
+    }
+
     close(saved_stdout);
 }

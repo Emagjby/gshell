@@ -44,12 +44,7 @@ int main(int argc, char *argv[]) {
     int saved_stdout = -1;
 
     if(command.stdout_path) {
-      saved_stdout = dup(STDOUT_FILENO);
-      if(saved_stdout < 0){
-        error(ERROR_FILE_OPERATION_FAILED, "Failed to save stdout");
-      }
-
-      redirect_stdout(command.stdout_path);
+      saved_stdout = redirect_stdout(command.stdout_path);
     }
 
     // execute command
