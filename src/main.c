@@ -16,7 +16,6 @@ int main(int argc, char *argv[]) {
 
   clear_screen();
   for(;;) {
-    if(setjmp(panic_env)) { continue; } // recover from panic
 
     // write prompt
     write_prompt();
@@ -30,14 +29,21 @@ int main(int argc, char *argv[]) {
     // Tokenize
     TokenArray tokenArray = tokenize(input);
 
+    for(int i = 0; i < tokenArray.count; i++) {
+      // Uncomment the following line to debug tokens
+      printf("Token %d: Type=%d, Value='%s'\n", i, tokenArray.tokens[i].type, tokenArray.tokens[i].value ? tokenArray.tokens[i].value : "NULL");
+    }
+
     // Parse
-    ArgVec argVec = parse(tokenArray);
+    Command command = parse(tokenArray);
 
     // Execute
-    execute(argVec);
+    execute(&command);
 
     // Free resources
+    if(setjmp(panic_env)) { continue; } // recover from panic
     free(input);
+    free_command(&command);
   }
 
   clear_screen();

@@ -6,7 +6,7 @@
 #include "error.h"
 #include "dynbuf.h"
 
-void error_command_not_found(char* command) {
+void error_command_not_found(const char* command) {
     DynBuf dynbuf;
     dynbuf_init(&dynbuf);
 
@@ -15,7 +15,6 @@ void error_command_not_found(char* command) {
 
     write(2, dynbuf.buf, dynbuf.len);
     dynbuf_free(&dynbuf);
-    free(command);
 }
 
 void error_insufficient_arguments(const char* command) {
@@ -44,7 +43,7 @@ void error_generic(const char* message, const char* details) {
     dynbuf_free(&dynbuf);
 }
 
-void error_no_such_directory(char* directory) {
+void error_no_such_directory(const char* directory) {
     DynBuf dynbuf;
     dynbuf_init(&dynbuf);
 
@@ -55,7 +54,6 @@ void error_no_such_directory(char* directory) {
     write(2, dynbuf.buf, dynbuf.len);
 
     dynbuf_free(&dynbuf);
-    free(directory);
 }
 
 void error(ErrorType errorType, const char* details) {
@@ -82,6 +80,6 @@ void error(ErrorType errorType, const char* details) {
             error_generic("An unknown error occurred:", details);
             break;
     }
+
     panic();
 }
-

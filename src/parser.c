@@ -32,7 +32,7 @@ char* build_argument(TokenArray* tokens, int start, int end) {
     return arg;
 }
 
-ArgVec parse(TokenArray tokens) {
+Command parse(TokenArray tokens) {
     ArgVec argv;
     argv.count = 0;
     argv.cap = 8;
@@ -82,6 +82,11 @@ ArgVec parse(TokenArray tokens) {
     // Null-terminate the argument list
     append_arg_end(&argv);
 
+    Command command;
+    command.argv = argv;
+    command.stdout_path = NULL;
+    command.stdout_append = NULL;
+
     free_token_array(&tokens);
-    return argv;
+    return command;
 }

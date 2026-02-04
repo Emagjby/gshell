@@ -13,14 +13,11 @@
 
 void type_command(ArgVec argv) {
   if (argv.count < 2) {
-    free_argvec(&argv);
     error(ERROR_INSUFFICIENT_ARGUMENTS, "type");
-    return;
   }
 
   if(is_builtin_command(argv.args[1])) {
     builtin_type(argv.args[1]);
-    free_argvec(&argv);
     return;
   }
 
@@ -39,11 +36,9 @@ void type_command(ArgVec argv) {
 
     write(1, dynbuf.buf, dynbuf.len);
     dynbuf_free(&dynbuf);
-    free_argvec(&argv);
     free(full_path);
   } else {
     unknown_type(argv.args[1]);
-    free_argvec(&argv);
   }
 }
 
@@ -60,7 +55,6 @@ void echo_command(ArgVec argv) {
   }
 
   write(1, "\n", 1);
-  free_argvec(&argv);
 }
 
 void run_command(ArgVec argv, char* path) {
@@ -69,7 +63,6 @@ void run_command(ArgVec argv, char* path) {
   run_program(full_path, argv.args);
 
   free(full_path);
-  free_argvec(&argv);
 }
 
 void pwd_command(void) {
@@ -83,21 +76,17 @@ void cd_command(ArgVec argv) {
   if (argv.count < 2) {
     char* home = getenv("HOME");
     if (home == NULL) {
-      free_argvec(&argv);
       error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
     }
     chdir(home);
-    free_argvec(&argv);
     return;
   }
 
   char* path = strcpy(malloc(strlen(argv.args[1]) + 1), argv.args[1]);
-  handle_home(&path, &argv);
+  handle_home(&path);
 
   if (chdir(path) != 0) {
-    free_argvec(&argv);
     error(ERROR_CD_NO_SUCH_DIRECTORY, path);
   }
   free(path);
-  free_argvec(&argv);
 }
