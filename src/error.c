@@ -79,6 +79,9 @@ void error(ErrorType errorType, const char* details) {
         case ERROR_TOKENIZATION_FAILED:
             error_generic("Tokenization failed:", details);
             break;
+        case ERROR_FILE_OPERATION_FAILED:
+            error_generic("File operation failed:", details);
+            break;
         default:
             error_generic("An unknown error occurred:", details);
             break;

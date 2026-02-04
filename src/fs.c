@@ -2,11 +2,13 @@
 #include <sys/wait.h>
 
 #include <stdio.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "dynbuf.h"
+#include "error.h"
 #include "fs.h"
 
 int check_directory(const char* directory, const char* command) {
@@ -98,4 +100,19 @@ void run_program(const char* path, char** argv){
     } else {
         perror("fork");
     }
+}
+
+void redirect_stdout(const char* path) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
+    }
+
+    dup2(fd, STDOUT_FILENO);
+    close(fd);
+}
+
+void restore_stdout(int saved_stdout) {
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdout);
 }

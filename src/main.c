@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <string.h>
 
+#include "fs.h"
+#include "error.h"
 #include "execute.h"
 #include "panic.h"
 #include "helpers.h"
@@ -34,27 +36,30 @@ int main(int argc, char *argv[]) {
       goto cleanup;
     }
 
-    // process input & execute
+    // process input
     tokenArray = tokenize(input);
-    printf("DEBUG: \n\n \x1b[31mTokens:\n");
-    for(int i = 0; i < tokenArray.count; i++) {
-      if(tokenArray.tokens[i].type == TOKEN_WHITESPACE) {
-        continue;
-      }
-      printf("Token %d: Type %d, Value '%s'\n", i, tokenArray.tokens[i].type, tokenArray.tokens[i].value ? tokenArray.tokens[i].value : "NULL");
-    }
     command = parse(tokenArray);
-    printf("\n\x1b[32mCommand:\n");
-    for(int i = 0; command.argv.args[i] != NULL; i++) {
-      printf("Arg %d: '%s'\n", i, command.argv.args[i]);
-    }
+
+    // handle redirection 
+    int saved_stdout = -1;
+
     if(command.stdout_path) {
-      printf("Redirect stdout to: '%s'\n", command.stdout_path);
+      saved_stdout = dup(STDOUT_FILENO);
+      if(saved_stdout < 0){
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to save stdout");
+      }
+
+      redirect_stdout(command.stdout_path);
     }
-    printf("\x1b[0m\n");
+
+    // execute command
     execute(&command);
 
 cleanup:
+    if(saved_stdout != -1) {
+      restore_stdout(saved_stdout);
+    }
+
     free(input);
     free_token_array(&tokenArray);
     free_command(&command);

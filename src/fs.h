@@ -4,4 +4,7 @@
 char* check_path_directories(const char* command);
 void run_program(const char* path, char** argv);
 
+void redirect_stdout(const char* path);
+void restore_stdout(int saved_stdout);
+
 #endif
