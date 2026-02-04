@@ -3,6 +3,9 @@
 #include "command.h"
 
 void free_command(Command* command) {
+    if(!command) {
+        return;
+    }
     free_argvec(&command->argv);
     if (command->stdout_path) {
         free(command->stdout_path);
