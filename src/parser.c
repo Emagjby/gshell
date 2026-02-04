@@ -53,15 +53,16 @@ Command parse(TokenArray tokens) {
         Token token = tokens.tokens[index];
 
         if(token.type == TOKEN_REDIRECT_OUT) {
-            // next token should be the file path
-            if(index + 1 >= tokens.count) {
+            // find next non-whitespace token for path
+            int path_index = index + 1;
+            while(path_index < tokens.count && tokens.tokens[path_index].type == TOKEN_WHITESPACE) {
+                path_index++;
+            }
+            if(path_index >= tokens.count || tokens.tokens[path_index].type != TOKEN_TEXT) {
                 error(ERROR_PARSING_FAILED, "Expected file path after redirect operator");
             }
 
-            Token path_token = tokens.tokens[index + 2]; // skip whitespace token
-            if(path_token.type != TOKEN_TEXT) {
-                error(ERROR_PARSING_FAILED, "Expected file path after redirect operator");
-            }
+            Token path_token = tokens.tokens[path_index];
 
             // set stdout_path in command
             char* path = malloc(strlen(path_token.value) + 1);
@@ -71,13 +72,13 @@ Command parse(TokenArray tokens) {
             strcpy(path, path_token.value);
 
             // advance index to skip path token
-            index++;
+            index = path_index;
 
             // store redirect info in command
             command.stdout_path = path;
 
             // update start to next token
-            start = index + 2; // skip whitespace token
+            start = index + 1; // skip whitespace token
             continue;
         }
 
