@@ -105,14 +105,24 @@ void run_program(const char* path, char** argv){
     }
 }
 
+static int ensure_fd_ge3(int fd) {
+    if (fd < 0) return -1;
+    if (fd >= 3) return fd;
+    int newfd = fcntl(fd, F_DUPFD, 3);
+    if (newfd < 0) return -1;
+    close(fd);
+    return newfd;
+}
+
 static int redirect_fd(int target_fd, const char* path, RedirectType append) {
-    int saved_fd = dup(target_fd);
+    int saved_fd = ensure_fd_ge3(dup(target_fd));
     if(saved_fd < 0){
       error(ERROR_FILE_OPERATION_FAILED, "Failed to save file descriptor");
     }
 
     int flags = O_WRONLY | O_CREAT | (append == REDIRECT_APPEND ? O_APPEND : O_TRUNC);
     int fd = open(path, flags, 0644);
+    fd = ensure_fd_ge3(fd);
     if (fd < 0) {
         close(saved_fd);
         error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
@@ -124,7 +134,9 @@ static int redirect_fd(int target_fd, const char* path, RedirectType append) {
         error(ERROR_FILE_OPERATION_FAILED, "Failed to redirect file descriptor");
     }
 
-    close(fd);
+    if (fd != target_fd) {
+        close(fd);
+    }
     return saved_fd;
 }
 
