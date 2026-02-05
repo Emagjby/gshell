@@ -19,4 +19,8 @@ void free_command(Command* command) {
         free(command->stdout_append);
         command->stdout_append = NULL;
     }
+    if (command->stderr_append) {
+        free(command->stderr_append);
+        command->stderr_append = NULL;
+    }
 }

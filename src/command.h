@@ -8,6 +8,7 @@ typedef struct {
     char* stdout_path;
     char* stderr_path;
     char* stdout_append;
+    char* stderr_append;
 } Command;
 
 void free_command(Command* command);

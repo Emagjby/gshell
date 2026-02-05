@@ -52,11 +52,19 @@ int main(int argc, char *argv[]) {
 
     // handle redirections
     if(state.command.stdout_path) {
-      state.saved_stdout = redirect_stdout(state.command.stdout_path);
+      state.saved_stdout = redirect_stdout(state.command.stdout_path, REDIRECT_OUT);
     }
 
     if(state.command.stderr_path) {
-      state.saved_stderr = redirect_stderr(state.command.stderr_path);
+      state.saved_stderr = redirect_stderr(state.command.stderr_path, REDIRECT_OUT);
+    }
+
+    if(state.command.stdout_append) {
+      state.saved_stdout = redirect_stdout(state.command.stdout_append, REDIRECT_APPEND);
+    }
+
+    if(state.command.stderr_append) {
+      state.saved_stderr = redirect_stderr(state.command.stderr_append, REDIRECT_APPEND);
     }
 
     // execute command
