@@ -46,6 +46,7 @@ Command parse(TokenArray tokens) {
     command.stdout_path = NULL;
     command.stderr_path = NULL;
     command.stdout_append = NULL;
+    command.stderr_append = NULL;
 
     int index = 0;
     int start = index;
@@ -71,26 +72,51 @@ Command parse(TokenArray tokens) {
 
             Token path_token = tokens.tokens[path_index];
 
-            // set stdout_append in command
-            char* path = malloc(strlen(path_token.value) + 1);
-            if(!path) {
-                abort(); // Handle memory allocation failure
+            if(strcmp(token.value, "1>>") == 0 || strcmp(token.value, ">>") == 0) {
+                // set stdout_append in command
+                char* path = malloc(strlen(path_token.value) + 1);
+                if(!path) {
+                    abort(); // Handle memory allocation failure
+                }
+                strcpy(path, path_token.value);
+
+                // advance index to skip path token
+                index = path_index;
+
+                // store redirect info in command
+                if(command.stdout_append) {
+                    free(command.stdout_append); 
+                    command.stdout_append = NULL;
+                }
+                command.stdout_append = path;
+
+                // update start to next token
+                start = index + 1; // skip whitespace token
+                continue;
+            } else if(strcmp(token.value, "2>>") == 0) {
+                // set stderr_path in command
+                char* path = malloc(strlen(path_token.value) + 1);
+                if(!path) {
+                    abort(); // Handle memory allocation failure
+                }
+                strcpy(path, path_token.value);
+
+                // advance index to skip path token
+                index = path_index;
+
+                // store redirect info in command
+                if(command.stderr_append) {
+                    free(command.stderr_append); 
+                    command.stderr_append = NULL;
+                }
+                command.stderr_append = path;
+
+                // update start to next token
+                start = index + 1; // skip whitespace token
+                continue;
+            } else {
+                error(ERROR_PARSING_FAILED, "Invalid redirect operator");
             }
-            strcpy(path, path_token.value);
-
-            // advance index to skip path token
-            index = path_index;
-
-            // store redirect info in command
-            if(command.stdout_append) {
-                free(command.stdout_append); 
-                command.stdout_append = NULL;
-            }
-            command.stdout_append = path;
-
-            // update start to next token
-            start = index + 1; // skip whitespace token
-            continue;
         }
 
         if(token.type == TOKEN_REDIRECT_OUT) {
