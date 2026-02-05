@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 #include "fs.h"
+#include "linenoise_setup.h"
 #include "execute.h"
 #include "panic.h"
 #include "helpers.h"
@@ -15,15 +15,17 @@ int main(int argc, char *argv[]) {
   (void)argv;
   setbuf(stdout, NULL);
 
-  clear_screen();
-
   static struct {
     char* input;
     TokenArray tokenArray;
     Command command;
     int saved_stdout;
     int saved_stderr;
+    char* prompt;
   } state;
+  repl_linenoise_init();
+
+  clear_screen();
 
   for(;;) {
     // prepare state
@@ -33,15 +35,16 @@ int main(int argc, char *argv[]) {
     state.saved_stdout = -1;
     state.saved_stderr = -1;
 
+    // TODO: support custom prompt
+    state.prompt = "$ ";
+
     // set panic recovery point
     if(setjmp(panic_env) != 0) {
       goto cleanup;
     }
 
-    write_prompt();
-
     // get input
-    state.input = get_input();
+    state.input = repl_readline(state.prompt);
     if(!state.input) {
       goto cleanup;
     }

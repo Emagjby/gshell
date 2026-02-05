@@ -1,6 +1,8 @@
 #ifndef HELPERS_H_
 #define HELPERS_H_
 
+extern const char* builtins[];
+
 void clear_screen(void);
 void write_prompt(void);
 char* get_input(void);

@@ -7,6 +7,8 @@
 #include "error.h"
 #include "dynbuf.h"
 
+const char* builtins[] = {"cd", "exit", "clear", "type", "echo", "pwd", NULL};
+
 void clear_screen(void) {
     write(1, "\033[2J\033[H", 7);
 }
@@ -28,7 +30,6 @@ void builtin_type(char* command) {
 }
 
 int is_builtin_command(const char* command) {
-    const char* builtins[] = {"cd", "exit", "clear", "type", "echo", "pwd", NULL};
     for (int i = 0; builtins[i] != NULL; i++) {
         if (strcmp(command, builtins[i]) == 0) {
             return 1;
