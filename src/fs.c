@@ -102,16 +102,25 @@ void run_program(const char* path, char** argv){
     }
 }
 
-int redirect_stdout(const char* path) {
+int redirect_stdout(const char* path, RedirectType append) {
     int saved_stdout = dup(STDOUT_FILENO);
     if(saved_stdout < 0){
       error(ERROR_FILE_OPERATION_FAILED, "Failed to save stdout");
     }
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        close(saved_stdout);
-        error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
+    int fd = -1;
+    if(append == REDIRECT_APPEND) {
+        fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd < 0) {
+            close(saved_stdout);
+            error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for appending redirection");
+        }
+    } else {
+        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd < 0) {
+            close(saved_stdout);
+            error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
+        }
     }
 
     if(dup2(fd, STDOUT_FILENO) < 0) {
@@ -133,16 +142,26 @@ void restore_stdout(int saved_stdout) {
     close(saved_stdout);
 }
 
-int redirect_stderr(const char* path) {
+int redirect_stderr(const char* path, RedirectType append) {
     int saved_stderr = dup(STDERR_FILENO);
     if(saved_stderr < 0){
       error(ERROR_FILE_OPERATION_FAILED, "Failed to save stderr");
     }
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        close(saved_stderr);
-        error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
+    int fd = -1;
+
+    if(append == REDIRECT_APPEND) {
+        fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd < 0) {
+            close(saved_stderr);
+            error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for appending redirection");
+        }
+    } else {
+        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd < 0) {
+            close(saved_stderr);
+            error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
+        }
     }
 
     if(dup2(fd, STDERR_FILENO) < 0) {

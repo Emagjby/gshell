@@ -94,21 +94,41 @@ TokenArray tokenize(const char* input) {
   for(;input[index] != '\0'; index++) {
     // first check for special tokens
     if(input[index] == '>') {
-      // build redirect token
-      Token token;
-      token.value = malloc(2);
-      if(!token.value) {
-        abort(); // Handle memory allocation failure
+      if(input[index + 1] == '>') {
+        // build redirect append token
+        Token token;
+        token.value = malloc(3);
+        if(!token.value) {
+          abort(); // Handle memory allocation failure
+        }
+        token.value[0] = '>';
+        token.value[1] = '>';
+        token.value[2] = '\0';
+        token.type = TOKEN_REDIRECT_APPEND;
+
+        // append token
+        append_token(&tokenArray, token);
+
+        index++; // consume extra '>'
+        start = index + 1;
+        continue;
+      } else {
+        // build redirect token
+        Token token;
+        token.value = malloc(2);
+        if(!token.value) {
+          abort(); // Handle memory allocation failure
+        }
+        token.value[0] = '>';
+        token.value[1] = '\0';
+        token.type = TOKEN_REDIRECT_OUT;
+
+        // append token
+        append_token(&tokenArray, token);
+
+        start = index + 1;
+        continue;
       }
-      token.value[0] = '>';
-      token.value[1] = '\0';
-      token.type = TOKEN_REDIRECT_OUT;
-
-      // append token
-      append_token(&tokenArray, token);
-
-      start = index + 1;
-      continue;
     }
     if(input[index] >= '0' && input[index] <= '9' && index == start) {
       int temp_index = index + 1;
@@ -118,23 +138,42 @@ TokenArray tokenize(const char* input) {
       }
 
       if(input[temp_index] == '>') {
-        // build redirect token
-        int length = temp_index - index + 1;
-        Token token;
-        token.value = malloc(length + 1);
-        if(!token.value) {
-          abort(); // Handle memory allocation failure
+        if(input[temp_index + 1] == '>') {
+          int length = temp_index - index + 2;
+          Token token;
+          token.value = malloc(length + 1);
+          if(!token.value) {
+            abort(); // Handle memory allocation failure
+          }
+          strncpy(token.value, &input[index], length);
+          token.value[length] = '\0';
+          token.type = TOKEN_REDIRECT_APPEND;
+
+          // append token
+          append_token(&tokenArray, token);
+
+          index = temp_index + 1; // advance main index
+          start = index + 1;
+          continue;
+        } else {
+          // build redirect token
+          int length = temp_index - index + 1;
+          Token token;
+          token.value = malloc(length + 1);
+          if(!token.value) {
+            abort(); // Handle memory allocation failure
+          }
+          strncpy(token.value, &input[index], length);
+          token.value[length] = '\0';
+          token.type = TOKEN_REDIRECT_OUT;
+
+          // append token
+          append_token(&tokenArray, token);
+
+          index = temp_index; // advance main index
+          start = index + 1;
+          continue;
         }
-        strncpy(token.value, &input[index], length);
-        token.value[length] = '\0';
-        token.type = TOKEN_REDIRECT_OUT;
-
-        // append token
-        append_token(&tokenArray, token);
-
-        index = temp_index; // advance main index
-        start = index + 1;
-        continue;
       }
     }
 

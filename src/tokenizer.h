@@ -5,6 +5,7 @@ typedef enum {
     TOKEN_WHITESPACE,
     TOKEN_TEXT,
     TOKEN_REDIRECT_OUT,
+    TOKEN_REDIRECT_APPEND,
     TOKEN_EOL
 } TokenType;
 

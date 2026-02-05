@@ -23,6 +23,7 @@ int main(int argc, char *argv[]) {
     Command command;
     int saved_stdout;
     int saved_stderr;
+    int saved_append_stdout;
   } state;
 
   for(;;) {
@@ -32,6 +33,7 @@ int main(int argc, char *argv[]) {
     state.command = (Command){0};
     state.saved_stdout = -1;
     state.saved_stderr = -1;
+    state.saved_append_stdout = -1;
 
     // set panic recovery point
     if(setjmp(panic_env) != 0) {
@@ -52,11 +54,15 @@ int main(int argc, char *argv[]) {
 
     // handle redirections
     if(state.command.stdout_path) {
-      state.saved_stdout = redirect_stdout(state.command.stdout_path);
+      state.saved_stdout = redirect_stdout(state.command.stdout_path, REDIRECT_OUT);
     }
 
     if(state.command.stderr_path) {
-      state.saved_stderr = redirect_stderr(state.command.stderr_path);
+      state.saved_stderr = redirect_stderr(state.command.stderr_path, REDIRECT_OUT);
+    }
+
+    if(state.command.stdout_append) {
+      state.saved_append_stdout = redirect_stdout(state.command.stdout_append, REDIRECT_APPEND);
     }
 
     // execute command
@@ -65,6 +71,7 @@ int main(int argc, char *argv[]) {
 cleanup:
     if(state.saved_stdout != -1) { restore_stdout(state.saved_stdout); }
     if(state.saved_stderr != -1) { restore_stderr(state.saved_stderr); }
+    if(state.saved_append_stdout != -1) { restore_stdout(state.saved_append_stdout); }
 
     free(state.input);
     free_token_array(&state.tokenArray);
