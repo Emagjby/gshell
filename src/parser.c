@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "parser.h"
+#include "redirect.h"
 #include "argvec.h"
 #include "tokenizer.h"
 #include "error.h"
@@ -54,137 +55,14 @@ Command parse(TokenArray tokens) {
     for (; index < tokens.count; index++){
         Token token = tokens.tokens[index];
 
-        if(token.type == TOKEN_REDIRECT_APPEND) {
+        if(token.type == TOKEN_REDIRECT_APPEND || token.type == TOKEN_REDIRECT_OUT) {
             if (start < index) {
                 char* arg = build_argument(&tokens, start, index);
                 append_arg(&argv, arg);
                 free(arg);
             }
 
-            // find next non-whitespace token for path
-            int path_index = index + 1;
-            while(path_index < tokens.count && tokens.tokens[path_index].type == TOKEN_WHITESPACE) {
-                path_index++;
-            }
-            if(path_index >= tokens.count || tokens.tokens[path_index].type != TOKEN_TEXT) {
-                error(ERROR_PARSING_FAILED, "Expected file path after redirect operator");
-            }
-
-            Token path_token = tokens.tokens[path_index];
-
-            if(strcmp(token.value, "1>>") == 0 || strcmp(token.value, ">>") == 0) {
-                // set stdout_append in command
-                char* path = malloc(strlen(path_token.value) + 1);
-                if(!path) {
-                    abort(); // Handle memory allocation failure
-                }
-                strcpy(path, path_token.value);
-
-                // advance index to skip path token
-                index = path_index;
-
-                // store redirect info in command
-                if(command.stdout_path) {
-                    free(command.stdout_path); 
-                    command.stdout_path = NULL;
-                }
-                if(command.stdout_append) {
-                    free(command.stdout_append); 
-                    command.stdout_append = NULL;
-                }
-                command.stdout_append = path;
-
-                // update start to next token
-                start = index + 1; // skip whitespace token
-                continue;
-            } else if(strcmp(token.value, "2>>") == 0) {
-                // set stderr_path in command
-                char* path = malloc(strlen(path_token.value) + 1);
-                if(!path) {
-                    abort(); // Handle memory allocation failure
-                }
-                strcpy(path, path_token.value);
-
-                // advance index to skip path token
-                index = path_index;
-
-                // store redirect info in command
-                if(command.stderr_path) {
-                    free(command.stderr_path); 
-                    command.stderr_path = NULL;
-                }
-                if(command.stderr_append) {
-                    free(command.stderr_append); 
-                    command.stderr_append = NULL;
-                }
-                command.stderr_append = path;
-
-                // update start to next token
-                start = index + 1; // skip whitespace token
-                continue;
-            } else {
-                error(ERROR_PARSING_FAILED, "Invalid redirect operator");
-            }
-        }
-
-        if(token.type == TOKEN_REDIRECT_OUT) {
-            if (start < index) {
-                char* arg = build_argument(&tokens, start, index);
-                append_arg(&argv, arg);
-                free(arg);
-            }
-
-            // find next non-whitespace token for path
-            int path_index = index + 1;
-            while(path_index < tokens.count && tokens.tokens[path_index].type == TOKEN_WHITESPACE) {
-                path_index++;
-            }
-            if(path_index >= tokens.count || tokens.tokens[path_index].type != TOKEN_TEXT) {
-                error(ERROR_PARSING_FAILED, "Expected file path after redirect operator");
-            }
-
-            Token path_token = tokens.tokens[path_index];
-
-            if(strcmp(token.value, ">") == 0 || strcmp(token.value, "1>") == 0) {
-                // set stdout_path in command
-                char* path = malloc(strlen(path_token.value) + 1);
-                if(!path) {
-                    abort(); // Handle memory allocation failure
-                }
-                strcpy(path, path_token.value);
-
-                // advance index to skip path token
-                index = path_index;
-
-                // store redirect info in command
-                if(command.stdout_path) {
-                    free(command.stdout_path); 
-                    command.stdout_path = NULL;
-                }
-                command.stdout_path = path;
-            } else if(strcmp(token.value, "2>") == 0) {
-                // set stderr_path in command
-                char* path = malloc(strlen(path_token.value) + 1);
-                if(!path) {
-                    abort(); // Handle memory allocation failure
-                }
-                strcpy(path, path_token.value);
-
-                // advance index to skip path token
-                index = path_index;
-
-                // store redirect info in command
-                if(command.stderr_path) {
-                    free(command.stderr_path); 
-                    command.stderr_path = NULL;
-                }
-                command.stderr_path = path;
-            } else {
-                error(ERROR_PARSING_FAILED, "Invalid redirect operator");
-            }
-
-            // update start to next token
-            start = index + 1; // skip whitespace token
+            handle_redirect(&command, &tokens, &index, &start, &token);
             continue;
         }
 
