@@ -102,83 +102,50 @@ void run_program(const char* path, char** argv){
     }
 }
 
-int redirect_stdout(const char* path, RedirectType append) {
-    int saved_stdout = dup(STDOUT_FILENO);
-    if(saved_stdout < 0){
-      error(ERROR_FILE_OPERATION_FAILED, "Failed to save stdout");
+static int redirect_fd(int target_fd, const char* path, RedirectType append) {
+    int saved_fd = dup(target_fd);
+    if(saved_fd < 0){
+      error(ERROR_FILE_OPERATION_FAILED, "Failed to save file descriptor");
     }
 
-    int fd = -1;
-    if(append == REDIRECT_APPEND) {
-        fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (fd < 0) {
-            close(saved_stdout);
-            error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for appending redirection");
-        }
-    } else {
-        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd < 0) {
-            close(saved_stdout);
-            error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
-        }
+    int flags = O_WRONLY | O_CREAT | (append == REDIRECT_APPEND ? O_APPEND : O_TRUNC);
+    int fd = open(path, flags, 0644);
+    if (fd < 0) {
+        close(saved_fd);
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
     }
 
-    if(dup2(fd, STDOUT_FILENO) < 0) {
+    if(dup2(fd, target_fd) < 0) {
         close(fd);
-        close(saved_stdout);
-        error(ERROR_FILE_OPERATION_FAILED, "Failed to redirect stdout");
+        close(saved_fd);
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to redirect file descriptor");
     }
 
     close(fd);
-    return saved_stdout;
+    return saved_fd;
+}
+
+void restore_fd(int saved_fd, int target_fd) {
+    if(dup2(saved_fd, target_fd) < 0) {
+        close(saved_fd);
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to restore file descriptor");
+    }
+
+    close(saved_fd);
+}
+
+int redirect_stdout(const char* path, RedirectType append) {
+    return redirect_fd(STDOUT_FILENO, path, append);
 }
 
 void restore_stdout(int saved_stdout) {
-    if(dup2(saved_stdout, STDOUT_FILENO) < 0) {
-        close(saved_stdout);
-        error(ERROR_FILE_OPERATION_FAILED, "Failed to restore stdout");
-    }
-
-    close(saved_stdout);
+    restore_fd(saved_stdout, STDOUT_FILENO);
 }
 
 int redirect_stderr(const char* path, RedirectType append) {
-    int saved_stderr = dup(STDERR_FILENO);
-    if(saved_stderr < 0){
-      error(ERROR_FILE_OPERATION_FAILED, "Failed to save stderr");
-    }
-
-    int fd = -1;
-
-    if(append == REDIRECT_APPEND) {
-        fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (fd < 0) {
-            close(saved_stderr);
-            error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for appending redirection");
-        }
-    } else {
-        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd < 0) {
-            close(saved_stderr);
-            error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
-        }
-    }
-
-    if(dup2(fd, STDERR_FILENO) < 0) {
-        close(fd);
-        close(saved_stderr);
-        error(ERROR_FILE_OPERATION_FAILED, "Failed to redirect stderr");
-    }
-
-    close(fd);
-    return saved_stderr;
+    return redirect_fd(STDERR_FILENO, path, append);
 }
 
 void restore_stderr(int saved_stderr) {
-    if(dup2(saved_stderr, STDERR_FILENO) < 0) {
-        close(saved_stderr);
-        error(ERROR_FILE_OPERATION_FAILED, "Failed to restore stderr");
-    }
-
-    close(saved_stderr);
+    restore_fd(saved_stderr, STDERR_FILENO);
 }
