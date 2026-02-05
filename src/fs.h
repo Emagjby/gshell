@@ -6,5 +6,7 @@ void run_program(const char* path, char** argv);
 
 int redirect_stdout(const char* path);
 void restore_stdout(int saved_stdout);
+int redirect_stderr(const char* path);
+void restore_stderr(int saved_stderr);
 
 #endif

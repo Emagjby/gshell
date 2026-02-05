@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "fs.h"
-#include "error.h"
 #include "execute.h"
 #include "panic.h"
 #include "helpers.h"
@@ -23,6 +22,7 @@ int main(int argc, char *argv[]) {
     TokenArray tokenArray;
     Command command;
     int saved_stdout;
+    int saved_stderr;
   } state;
 
   for(;;) {
@@ -31,6 +31,7 @@ int main(int argc, char *argv[]) {
     state.tokenArray = (TokenArray){0};
     state.command = (Command){0};
     state.saved_stdout = -1;
+    state.saved_stderr = -1;
 
     // set panic recovery point
     if(setjmp(panic_env) != 0) {
@@ -54,13 +55,16 @@ int main(int argc, char *argv[]) {
       state.saved_stdout = redirect_stdout(state.command.stdout_path);
     }
 
+    if(state.command.stderr_path) {
+      state.saved_stderr = redirect_stderr(state.command.stderr_path);
+    }
+
     // execute command
     execute(&state.command);
 
 cleanup:
-    if(state.saved_stdout != -1) {
-      restore_stdout(state.saved_stdout);
-    }
+    if(state.saved_stdout != -1) { restore_stdout(state.saved_stdout); }
+    if(state.saved_stderr != -1) { restore_stderr(state.saved_stderr); }
 
     free(state.input);
     free_token_array(&state.tokenArray);
