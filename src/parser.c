@@ -44,6 +44,7 @@ Command parse(TokenArray tokens) {
 
     Command command;
     command.stdout_path = NULL;
+    command.stderr_path = NULL;
     command.stdout_append = NULL;
 
     int index = 0;
@@ -70,22 +71,43 @@ Command parse(TokenArray tokens) {
 
             Token path_token = tokens.tokens[path_index];
 
-            // set stdout_path in command
-            char* path = malloc(strlen(path_token.value) + 1);
-            if(!path) {
-                abort(); // Handle memory allocation failure
-            }
-            strcpy(path, path_token.value);
+            if(strcmp(token.value, ">") == 0 || strcmp(token.value, "1>") == 0) {
+                // set stdout_path in command
+                char* path = malloc(strlen(path_token.value) + 1);
+                if(!path) {
+                    abort(); // Handle memory allocation failure
+                }
+                strcpy(path, path_token.value);
 
-            // advance index to skip path token
-            index = path_index;
+                // advance index to skip path token
+                index = path_index;
 
-            // store redirect info in command
-            if(command.stdout_path) {
-                free(command.stdout_path); 
-                command.stdout_path = NULL;
+                // store redirect info in command
+                if(command.stdout_path) {
+                    free(command.stdout_path); 
+                    command.stdout_path = NULL;
+                }
+                command.stdout_path = path;
+            } else if(strcmp(token.value, "2>") == 0) {
+                // set stderr_path in command
+                char* path = malloc(strlen(path_token.value) + 1);
+                if(!path) {
+                    abort(); // Handle memory allocation failure
+                }
+                strcpy(path, path_token.value);
+
+                // advance index to skip path token
+                index = path_index;
+
+                // store redirect info in command
+                if(command.stderr_path) {
+                    free(command.stderr_path); 
+                    command.stderr_path = NULL;
+                }
+                command.stderr_path = path;
+            } else {
+                error(ERROR_PARSING_FAILED, "Invalid redirect operator");
             }
-            command.stdout_path = path;
 
             // update start to next token
             start = index + 1; // skip whitespace token

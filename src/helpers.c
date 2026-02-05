@@ -4,7 +4,6 @@
 #include <stdio.h>
 
 #include "helpers.h"
-#include "argvec.h"
 #include "error.h"
 #include "dynbuf.h"
 

@@ -6,6 +6,7 @@
 typedef struct {
     ArgVec argv;
     char* stdout_path;
+    char* stderr_path;
     char* stdout_append;
 } Command;
 

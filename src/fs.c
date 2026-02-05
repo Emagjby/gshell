@@ -132,3 +132,34 @@ void restore_stdout(int saved_stdout) {
 
     close(saved_stdout);
 }
+
+int redirect_stderr(const char* path) {
+    int saved_stderr = dup(STDERR_FILENO);
+    if(saved_stderr < 0){
+      error(ERROR_FILE_OPERATION_FAILED, "Failed to save stderr");
+    }
+
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        close(saved_stderr);
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
+    }
+
+    if(dup2(fd, STDERR_FILENO) < 0) {
+        close(fd);
+        close(saved_stderr);
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to redirect stderr");
+    }
+
+    close(fd);
+    return saved_stderr;
+}
+
+void restore_stderr(int saved_stderr) {
+    if(dup2(saved_stderr, STDERR_FILENO) < 0) {
+        close(saved_stderr);
+        error(ERROR_FILE_OPERATION_FAILED, "Failed to restore stderr");
+    }
+
+    close(saved_stderr);
+}
