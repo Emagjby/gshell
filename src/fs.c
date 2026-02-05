@@ -46,7 +46,10 @@ char** decompose_path(const char* path_env) {
 
     for (int i = 0; path_env[i] != '\0'; i++) {
         if (path_env[i] == ':' || path_env[i + 1] == '\0') {
-            int length = i - start;
+            int length = (path_env[i] == ':')
+                ? (i - start)
+                : (i - start + 1);
+
             char* dir = malloc(length + 1);
             strncpy(dir, &path_env[start], length);
             dir[length] = '\0';
