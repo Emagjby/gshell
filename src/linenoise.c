@@ -609,39 +609,17 @@ static int getCursorPosition(int ifd, int ofd) {
  * if it fails. */
 static int getColumns(int ifd, int ofd) {
     struct winsize ws;
+    (void)ifd;
+    (void)ofd;
 
     /* Test mode: use LINENOISE_COLS env var for fixed width. */
     char *cols_env = getenv("LINENOISE_COLS");
     if (cols_env) return atoi(cols_env);
 
     if (ioctl(1, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
-        /* ioctl() failed. Try to query the terminal itself. */
-        int start, cols;
-
-        /* Get the initial position so we can restore it later. */
-        start = getCursorPosition(ifd,ofd);
-        if (start == -1) goto failed;
-
-        /* Go to right margin and get position. */
-        if (write(ofd,"\x1b[999C",6) != 6) goto failed;
-        cols = getCursorPosition(ifd,ofd);
-        if (cols == -1) goto failed;
-
-        /* Restore position. */
-        if (cols > start) {
-            char seq[32];
-            snprintf(seq,32,"\x1b[%dD",cols-start);
-            if (write(ofd,seq,strlen(seq)) == -1) {
-                /* Can't recover... */
-            }
-        }
-        return cols;
-    } else {
-        return ws.ws_col;
-    }
-
-failed:
-    return 80;
+        return 80;
+    } 
+    return ws.ws_col;
 }
 
 /* Clear the screen. Used to handle ctrl+l */
@@ -1341,6 +1319,7 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
     }
 
     switch(c) {
+    case '\n':
     case ENTER:    /* enter */
         history_len--;
         free(history[history_len]);
