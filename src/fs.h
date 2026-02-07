@@ -6,6 +6,9 @@ typedef enum {
     REDIRECT_APPEND
 } RedirectType;
 
+int count_dirs(const char* path_env);
+void free_directories(char** directories, int count);
+char** decompose_path(const char* path_env);
 char* check_path_directories(const char* command);
 void run_program(const char* path, char** argv);
 

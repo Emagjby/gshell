@@ -9,6 +9,7 @@
 #include "helpers.h"
 #include "tokenizer.h"
 #include "parser.h"
+#include "rehash.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;
@@ -22,11 +23,13 @@ int main(int argc, char *argv[]) {
     int saved_stdout;
     int saved_stderr;
     char* prompt;
+    const char* const* externals;
   } state;
   repl_linenoise_init();
 
   clear_screen();
 
+  rehash_command_table();
   for(;;) {
     // prepare state
     state.input = NULL;
@@ -34,6 +37,7 @@ int main(int argc, char *argv[]) {
     state.command = (Command){0};
     state.saved_stdout = -1;
     state.saved_stderr = -1;
+    state.externals = command_table;
 
     // TODO: support custom prompt
     state.prompt = "$ ";
@@ -74,6 +78,8 @@ int main(int argc, char *argv[]) {
     execute(&state.command);
 
 cleanup:
+    rehash_command_table();
+
     if(state.saved_stdout != -1) { restore_stdout(state.saved_stdout); }
     if(state.saved_stderr != -1) { restore_stderr(state.saved_stderr); }
 
