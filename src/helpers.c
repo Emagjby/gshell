@@ -1,3 +1,4 @@
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
@@ -10,12 +11,12 @@
 const char* builtins[] = {"cd", "exit", "clear", "type", "echo", "pwd", NULL};
 
 void clear_screen(void) {
-    write(1, "\033[2J\033[H", 7);
+    write(STDOUT_FILENO, "\033[2J\033[H", 7);
 }
 
 void write_prompt(void) {
     char prompt[2] = {'$', ' '};
-    write(1, prompt, sizeof(prompt));
+    write(STDOUT_FILENO, prompt, sizeof(prompt));
 }
 
 void builtin_type(char* command) {
@@ -25,7 +26,7 @@ void builtin_type(char* command) {
     dynbuf_append(&dynbuf, command);
     dynbuf_append(&dynbuf, " is a shell builtin\n");
 
-    write(1, dynbuf.buf, dynbuf.len);
+    write(STDOUT_FILENO, dynbuf.buf, dynbuf.len);
     dynbuf_free(&dynbuf);
 }
 
@@ -75,7 +76,7 @@ void unknown_type(char* command) {
     dynbuf_append(&dynbuf, command);
     dynbuf_append(&dynbuf, ": not found\n");
 
-    write(1, dynbuf.buf, dynbuf.len);
+    write(STDOUT_FILENO, dynbuf.buf, dynbuf.len);
     dynbuf_free(&dynbuf);
 }
 
@@ -99,4 +100,53 @@ void handle_home(char** path) {
         free(*path);
         error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "HOME");
     }
+}
+
+static int ln_get_term_width(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
+        return 80; // default width
+    }
+
+    if (ws.ws_col == 0)
+        return 80;
+
+    return ws.ws_col;
+}
+int cmp_str(const void* a, const void* b) {
+    const char* str_a = *(const char**)a;
+    const char* str_b = *(const char**)b;
+    return strcmp(str_a, str_b);
+}
+
+void print_ln_grid(char **items, size_t count) {
+    if (count == 0) return;
+
+    qsort(items, count, sizeof(char*), cmp_str);
+
+    int max = 0;
+    for (size_t i = 0; i < count; i++) {
+        int len = strlen(items[i]);
+        if (len > max) max = len;
+    }
+
+    int term_width = ln_get_term_width();
+
+    int col_width = max + 2; 
+    int cols = term_width / col_width;
+    if (cols < 1) cols = 1;
+
+    for (size_t i = 0; i < count; i++) {
+        write(STDOUT_FILENO, items[i], strlen(items[i]));
+
+        int pad = col_width - strlen(items[i]);
+        for (int j = 0; j < pad; j++)
+            write(STDOUT_FILENO, " ", 1);
+
+        if ((i + 1) % cols == 0)
+            write(STDOUT_FILENO, "\r\n", 2);
+    }
+
+    if (count % cols != 0)
+        write(STDOUT_FILENO, "\r\n", 2);
 }

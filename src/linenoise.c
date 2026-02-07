@@ -117,6 +117,8 @@
 #include <unistd.h>
 #include <stdint.h>
 #include "linenoise.h"
+#include "multi_completions.h"
+#include "helpers.h"
 
 #define LINENOISE_DEFAULT_HISTORY_MAX_LEN 100
 #define LINENOISE_MAX_LINE 4096
@@ -136,6 +138,9 @@ static int atexit_registered = 0; /* Register atexit just 1 time. */
 static int history_max_len = LINENOISE_DEFAULT_HISTORY_MAX_LEN;
 static int history_len = 0;
 static char **history = NULL;
+
+static int has_listed = 0;
+static int has_beeped = 0;
 
 /* =========================== UTF-8 support ================================ */
 
@@ -1287,7 +1292,39 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
      * there was an error reading from fd. Otherwise it will return the
      * character that should be handled next. */
     if ((l->in_completion || c == 9) && completionCallback != NULL) {
-        c = completeLine(l,c);
+        char** items;
+        int items_count;
+        if(check_multi_completions(l->buf, &items, &items_count)) {
+            /* If more than one way to complete,
+             * we print a grid list containing 
+             * all the options. */
+            if(!has_beeped) {
+                linenoiseBeep();
+                has_beeped = 1;
+                return linenoiseEditMore;
+            } else {
+                if(!has_listed) {
+                    // if hasnt listed, list the options
+                    write(STDOUT_FILENO, "\r\n", 2);
+                    print_ln_grid(items, items_count);
+
+                    refreshLine(l);
+
+                    has_listed = 1;
+
+                    for (int i = 0; i < items_count; i++) {
+                        free(items[i]);
+                    }
+                    free(items);
+                    return linenoiseEditMore;
+                } else {
+                    // if shown start scrolling through the options
+                    c = completeLine(l, c);
+                }
+            }
+        } else {
+            c = completeLine(l,c);
+        }
         /* Return on errors */
         if (c < 0) return NULL;
         /* Read next character when 0 */
@@ -1315,6 +1352,8 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
     case BACKSPACE:   /* backspace */
     case 8:     /* ctrl-h */
         linenoiseEditBackspace(l);
+        has_beeped = 0;
+        has_listed = 0;
         break;
     case CTRL_D:     /* ctrl-d, remove char at right of cursor, or if the
                         line is empty, act as end-of-file. */
@@ -1425,6 +1464,8 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
                 }
             }
             if (linenoiseEditInsert(l, utf8, utf8len)) return NULL;
+            has_beeped = 0;
+            has_listed = 0;
         }
         break;
     case CTRL_U: /* Ctrl+u, delete the whole line. */

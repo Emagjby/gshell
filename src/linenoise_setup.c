@@ -8,8 +8,7 @@
 #include "linenoise_setup.h"
 #include "helpers.h"
 
-static void complete_from_table(const char* token, const char* prefix, linenoiseCompletions* lc, const char* const* table) {
-    for(int i = 0; table[i]; i++) {
+static void complete_from_table(const char* token, const char* prefix, linenoiseCompletions* lc, const char* const* table) { for(int i = 0; table[i]; i++) {
         if(strncmp(token, table[i], strlen(token)) == 0) {
             DynBuf dynbuf;
             dynbuf_init(&dynbuf);

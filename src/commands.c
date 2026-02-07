@@ -34,7 +34,7 @@ void type_command(ArgVec argv) {
     dynbuf_append(&dynbuf, full_path);
     dynbuf_append(&dynbuf, "\n");
 
-    write(1, dynbuf.buf, dynbuf.len);
+    write(STDOUT_FILENO, dynbuf.buf, dynbuf.len);
     dynbuf_free(&dynbuf);
     free(full_path);
   } else {
@@ -43,18 +43,18 @@ void type_command(ArgVec argv) {
 }
 
 void clear_command() {
-  write(1, "\x1b[H\x1b[2J", 7);
+  write(STDOUT_FILENO, "\x1b[H\x1b[2J", 7);
 }
 
 void echo_command(ArgVec argv) {
   for(int i = 1; i < argv.count; i++) {
-    write(1, argv.args[i], strlen(argv.args[i]));
+    write(STDOUT_FILENO, argv.args[i], strlen(argv.args[i]));
     if (i < argv.count - 1) {
-      write(1, " ", 1);
+      write(STDOUT_FILENO, " ", 1);
     }
   }
 
-  write(1, "\n", 1);
+  write(STDOUT_FILENO, "\n", 1);
 }
 
 void run_command(ArgVec argv, char* path) {
@@ -68,8 +68,8 @@ void run_command(ArgVec argv, char* path) {
 void pwd_command(void) {
   char cwd[PATH_MAX];
   getcwd(cwd, sizeof(cwd));
-  write(1, cwd, strlen(cwd));
-  write(1, "\n", 1);
+  write(STDOUT_FILENO, cwd, strlen(cwd));
+  write(STDOUT_FILENO, "\n", 1);
 }
 
 void cd_command(ArgVec argv) {
