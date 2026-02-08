@@ -7,6 +7,44 @@
 #include "dynbuf.h"
 #include "linenoise_setup.h"
 #include "helpers.h"
+#include "fs.h"
+
+static void complete_from_filesystem(const char* token, const char* prefix, linenoiseCompletions* lc) {
+    const char* last_slash = strrchr(token, '/');
+    const char* dir = last_slash ? (last_slash == token ? "/" : strndup(token, last_slash - token)) : ".";
+    const char* file_prefix = last_slash ? last_slash + 1 : token;
+
+    int count;
+    char** items = list_dir(dir, &count);
+    if(items) {
+        for(int i = 0; items[i]; i++) {
+            if(strncmp(file_prefix, items[i], strlen(file_prefix)) == 0) {
+                DynBuf dynbuf;
+                dynbuf_init(&dynbuf);
+                
+                dynbuf_append(&dynbuf, prefix);
+                if(last_slash) {
+                    dynbuf_append(&dynbuf, dir);
+                    if(dir[strlen(dir) - 1] != '/') {
+                        dynbuf_append(&dynbuf, "/");
+                    }
+                }
+
+                dynbuf_append(&dynbuf, items[i]);
+                dynbuf_append(&dynbuf, " ");
+
+                linenoiseAddCompletion(lc, dynbuf.buf);
+                dynbuf_free(&dynbuf);
+            }
+            free(items[i]);
+        }
+        free(items);
+    }
+
+    if(last_slash && dir != token) {
+        free((char*)dir);
+    }
+}
 
 static void complete_from_table(const char* token, const char* prefix, linenoiseCompletions* lc, const char* const* table) { for(int i = 0; table[i]; i++) {
         if(strncmp(token, table[i], strlen(token)) == 0) {
@@ -40,6 +78,8 @@ static void completion_callback(const char* buf, linenoiseCompletions* lc) {
     if(is_first_token) {
         complete_from_table(token, prefix, lc, builtins);
         complete_from_table(token, prefix, lc, command_table);
+    } else {
+        complete_from_filesystem(token, prefix, lc);    
     }
 
     free(prefix);

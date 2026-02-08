@@ -1,5 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -164,3 +166,52 @@ int redirect_stderr(const char* path, RedirectType append) {
 void restore_stderr(int saved_stderr) {
     restore_fd(saved_stderr, STDERR_FILENO);
 }
+
+char** list_dir(const char* dir, int* out_count) {
+    *out_count = 0;
+
+    DIR* d = opendir(dir);
+    if(!d) return NULL;
+
+    int cap = 16;
+    char** items = malloc(sizeof(char*) * cap);
+
+    struct dirent* ent;
+    while((ent = readdir(d))) {
+        if (strcmp(ent->d_name, ".") == 0 ||
+            strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+
+        if(*out_count >= cap) {
+            cap *= 2;
+            items = realloc(items, sizeof(char*) * cap);
+        }
+
+        DynBuf dynbuf;
+        dynbuf_init(&dynbuf);
+
+        if(strcmp(dir, ".") == 0) {
+            dynbuf_append(&dynbuf, ent->d_name);
+        } else {
+            dynbuf_append(&dynbuf, dir);
+            dynbuf_append(&dynbuf, "/");
+            dynbuf_append(&dynbuf, ent->d_name);
+        }
+
+        struct stat st;
+        if(stat(dynbuf.buf, &st) == 0 && S_ISDIR(st.st_mode)) {
+            dynbuf_append(&dynbuf, "/");
+        }
+
+        items[*out_count] = strdup(dynbuf.buf);
+        (*out_count)++;
+
+        dynbuf_free(&dynbuf);
+    }
+
+    items[*out_count] = NULL;
+    closedir(d);
+    return items;
+}
+

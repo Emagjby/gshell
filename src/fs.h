@@ -17,4 +17,6 @@ void restore_stdout(int saved_stdout);
 int redirect_stderr(const char* path, RedirectType type);
 void restore_stderr(int saved_stderr);
 
+char** list_dir(const char* dir, int* out_count);
+
 #endif
