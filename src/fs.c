@@ -1,5 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -46,7 +48,10 @@ char** decompose_path(const char* path_env) {
 
     for (int i = 0; path_env[i] != '\0'; i++) {
         if (path_env[i] == ':' || path_env[i + 1] == '\0') {
-            int length = i - start;
+            int length = (path_env[i] == ':')
+                ? (i - start)
+                : (i - start + 1);
+
             char* dir = malloc(length + 1);
             strncpy(dir, &path_env[start], length);
             dir[length] = '\0';
@@ -102,14 +107,24 @@ void run_program(const char* path, char** argv){
     }
 }
 
+static int ensure_fd_ge3(int fd) {
+    if (fd < 0) return -1;
+    if (fd >= 3) return fd;
+    int newfd = fcntl(fd, F_DUPFD, 3);
+    if (newfd < 0) return -1;
+    close(fd);
+    return newfd;
+}
+
 static int redirect_fd(int target_fd, const char* path, RedirectType append) {
-    int saved_fd = dup(target_fd);
+    int saved_fd = ensure_fd_ge3(dup(target_fd));
     if(saved_fd < 0){
       error(ERROR_FILE_OPERATION_FAILED, "Failed to save file descriptor");
     }
 
     int flags = O_WRONLY | O_CREAT | (append == REDIRECT_APPEND ? O_APPEND : O_TRUNC);
     int fd = open(path, flags, 0644);
+    fd = ensure_fd_ge3(fd);
     if (fd < 0) {
         close(saved_fd);
         error(ERROR_FILE_OPERATION_FAILED, "Failed to open file for redirection");
@@ -121,7 +136,9 @@ static int redirect_fd(int target_fd, const char* path, RedirectType append) {
         error(ERROR_FILE_OPERATION_FAILED, "Failed to redirect file descriptor");
     }
 
-    close(fd);
+    if (fd != target_fd) {
+        close(fd);
+    }
     return saved_fd;
 }
 
@@ -149,3 +166,76 @@ int redirect_stderr(const char* path, RedirectType append) {
 void restore_stderr(int saved_stderr) {
     restore_fd(saved_stderr, STDERR_FILENO);
 }
+
+char** list_dir(const char* dir, size_t* out_count) {
+    *out_count = 0;
+
+    DIR* d = opendir(dir);
+    if(!d) return NULL;
+
+    size_t cap = 16;
+    char** items = malloc(sizeof(char*) * (cap + 1));
+    if(!items) {
+        closedir(d);
+        return NULL;
+    }
+
+    struct dirent* ent;
+    while((ent = readdir(d))) {
+        if (strcmp(ent->d_name, ".") == 0 ||
+            strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+
+        if(*out_count >= cap) {
+            cap *= 2;
+            char** tmp = realloc(items, sizeof(char*) * (cap + 1));
+            if(!tmp) {
+                for(size_t i = 0; i < *out_count; i++) {
+                    free(items[i]);
+                }
+                free(items);
+                closedir(d);
+                *out_count = 0;
+                return NULL;
+            }
+            items = tmp;
+        }
+
+        DynBuf dynbuf;
+        dynbuf_init(&dynbuf);
+
+        if(strcmp(dir, ".") == 0) {
+            dynbuf_append(&dynbuf, ent->d_name);
+        } else {
+            dynbuf_append(&dynbuf, dir);
+            dynbuf_append(&dynbuf, "/");
+            dynbuf_append(&dynbuf, ent->d_name);
+        }
+
+        struct stat st;
+        if(stat(dynbuf.buf, &st) == 0 && S_ISDIR(st.st_mode)) {
+            dynbuf_append(&dynbuf, "/");
+        }
+
+        items[*out_count] = strdup(dynbuf.buf);
+        if(!items[*out_count]) {
+            dynbuf_free(&dynbuf);
+            for(size_t i = 0; i < *out_count; i++) {
+                free(items[i]);
+            }
+            free(items);
+            closedir(d);
+            *out_count = 0;
+            return NULL;
+        }
+        (*out_count)++;
+
+        dynbuf_free(&dynbuf);
+    }
+
+    items[*out_count] = NULL;
+    closedir(d);
+    return items;
+}
+
