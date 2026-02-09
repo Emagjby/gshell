@@ -19,8 +19,9 @@ int check_multi_completions(char* buf, char*** items, size_t* out_count) {
 
     int is_first_token = (token_start == NULL);
 
+    *items = NULL;
+    *out_count = 0;
     if(token[0] == '\0' && is_first_token) {
-        *items = NULL;
         return (*out_count = 0);
     } else if(is_first_token) {
         // Check builtins and command_table for matches
@@ -38,6 +39,10 @@ int check_multi_completions(char* buf, char*** items, size_t* out_count) {
 
         if(count > 1) {
             *items = malloc(sizeof(char*) * (count + 1));
+            if(*items == NULL) {
+                *out_count = 0;
+                return 0; 
+            }
             int index = 0;
             for(int i = 0; builtins[i]; i++) {
                 if(strncmp(token, builtins[i], strlen(token)) == 0) {

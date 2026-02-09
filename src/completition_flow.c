@@ -31,12 +31,6 @@ int filter_by_lcp(char **candidates, const char *lcp) {
     return w; // new count
 }
 
-int cmp_str_len(const void* a, const void* b) {
-    const char* str_a = *(const char**)a;
-    const char* str_b = *(const char**)b;
-    return strcmp(str_a, str_b);
-}
-
 char** apply_completion_flow(
         const char* buf, 
         size_t candidates_len, 
@@ -47,6 +41,11 @@ char** apply_completion_flow(
     // Copy candidates to a new array that we can modify without affecting the original
     *out_count = candidates_len;
     char** copy = malloc(sizeof(char*) * (candidates_len + 1));
+    if(copy == NULL) {
+        *out_count = 0;
+        *has_lcps = 0;
+        return NULL; 
+    }
 
     for(size_t i = 0; i < candidates_len; i++) {
         copy[i] = strdup(candidates[i]);
@@ -66,7 +65,7 @@ char** apply_completion_flow(
     }
 
     if(*has_lcps) {
-        qsort(copy, *out_count, sizeof(char*), cmp_str_len);
+        qsort(copy, *out_count, sizeof(char*), cmp_str);
         remove_trailing_whitespaces(&copy);
     }
 

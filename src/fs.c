@@ -175,6 +175,10 @@ char** list_dir(const char* dir, size_t* out_count) {
 
     size_t cap = 16;
     char** items = malloc(sizeof(char*) * (cap + 1));
+    if(!items) {
+        closedir(d);
+        return NULL;
+    }
 
     struct dirent* ent;
     while((ent = readdir(d))) {

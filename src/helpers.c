@@ -113,6 +113,7 @@ static int ln_get_term_width(void) {
 
     return ws.ws_col;
 }
+
 int cmp_str(const void* a, const void* b) {
     const char* str_a = *(const char**)a;
     const char* str_b = *(const char**)b;
@@ -124,9 +125,9 @@ void print_ln_grid(char **items, size_t count) {
 
     qsort(items, count, sizeof(char*), cmp_str);
 
-    int max = 0;
+    size_t max = 0;
     for (size_t i = 0; i < count; i++) {
-        int len = strlen(items[i]);
+        size_t len = strlen(items[i]);
         if (len > max) max = len;
     }
 
@@ -140,9 +141,10 @@ void print_ln_grid(char **items, size_t count) {
     memset(pad_buf, ' ', sizeof(pad_buf));
 
     for (size_t i = 0; i < count; i++) {
-        write(STDOUT_FILENO, items[i], strlen(items[i]));
+        size_t slen = strlen(items[i]);
+        write(STDOUT_FILENO, items[i], slen);
 
-        int pad = col_width - strlen(items[i]);
+        size_t pad = col_width - slen;
         while(pad > 0){
             int chunk = pad < (int)sizeof(pad_buf) ? pad : (int)sizeof(pad_buf);
             write(STDOUT_FILENO, pad_buf, chunk);

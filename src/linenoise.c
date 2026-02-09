@@ -105,7 +105,6 @@
 
 #include <termios.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
@@ -114,7 +113,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
-#include <unistd.h>
 #include <stdint.h>
 #include "linenoise.h"
 
@@ -681,7 +679,7 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
 
     completionCallback(ls->buf,&lc);
 
-    size_t new_len = -1;
+    size_t new_len = 0;
     int has_lcps = -1;
     char** new = apply_completion_flow(ls->buf, lc.len, lc.cvec, &new_len, &has_lcps);
     freeCompletions(&lc);
@@ -730,7 +728,7 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
         }
     }
 
-    freeCompletions(&lc);
+    if(lc.cvec != NULL) freeCompletions(&lc);
     return c; /* Return last read character */
 }
 
@@ -1312,6 +1310,10 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
             if(!has_beeped) {
                 linenoiseBeep();
                 has_beeped = 1;
+                for(size_t i = 0; items[i]; i++) {
+                    free(items[i]);
+                }
+                free(items);
                 return linenoiseEditMore;
             } else {
                 if(!has_listed) {

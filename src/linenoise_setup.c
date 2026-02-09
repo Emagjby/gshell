@@ -36,7 +36,7 @@ static void complete_from_filesystem(const char* token, const char* prefix, line
 
     const char* file_prefix = last_slash ? last_slash + 1 : token;
 
-    size_t count = -1;
+    size_t count = 0;
     char** items = list_dir(dir, &count);
     if(items) {
         for(int i = 0; items[i]; i++) {
@@ -80,7 +80,8 @@ static void complete_from_filesystem(const char* token, const char* prefix, line
     }
 }
 
-static void complete_from_table(const char* token, const char* prefix, linenoiseCompletions* lc, const char* const* table) { for(int i = 0; table[i]; i++) {
+static void complete_from_table(const char* token, const char* prefix, linenoiseCompletions* lc, const char* const* table) { 
+    for(int i = 0; table[i]; i++) {
         if(strncmp(token, table[i], strlen(token)) == 0) {
             DynBuf dynbuf;
             dynbuf_init(&dynbuf);
