@@ -1,9 +1,9 @@
 #ifndef PARSER_H_
 #define PARSER_H_
 
-#include "command.h"
+#include "pipeline.h"
 #include "tokenizer.h"
 
-Command parse(TokenArray tokens);
+Pipeline parse(TokenArray tokens);
 
 #endif

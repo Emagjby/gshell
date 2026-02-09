@@ -1,5 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 
 #include "panic.h"
@@ -56,7 +54,7 @@ void error_no_such_directory(const char* directory) {
     dynbuf_free(&dynbuf);
 }
 
-void error(ErrorType errorType, const char* details) {
+static void dispatch_error(ErrorType errorType, const char* details) {
     switch (errorType) {
         case ERROR_COMMAND_NOT_FOUND:
             error_command_not_found((char*)details);
@@ -82,10 +80,20 @@ void error(ErrorType errorType, const char* details) {
         case ERROR_FILE_OPERATION_FAILED:
             error_generic("File operation failed:", details);
             break;
+        case ERROR_EXECUTE_ERROR:
+             error_generic("Execution error:", details);
+             break;
         default:
             error_generic("An unknown error occurred:", details);
             break;
     }
+}
 
+void error_no_panic(ErrorType errorType, const char* details) {
+    dispatch_error(errorType, details);
+}
+
+void error(ErrorType errorType, const char* details) {
+    dispatch_error(errorType, details);
     panic();
 }

@@ -35,7 +35,7 @@ void append_arg_end(ArgVec* argv) {
 }
 
 void free_argvec(ArgVec* argv) {
-    for (int i = 0; i < argv->count; i++) {
+    for (size_t i = 0; i < argv->count; i++) {
         free(argv->args[i]);
     }
     free(argv->args);
