@@ -150,3 +150,36 @@ void print_ln_grid(char **items, size_t count) {
     if (count % cols != 0)
         write(STDOUT_FILENO, "\r\n", 2);
 }
+
+void dedupe(char*** items, size_t* out_count) {
+    if(*items == NULL) return;
+
+    int count = 0;
+    for(int i = 0; (*items)[i] != NULL; i++) {
+        count++;
+    }
+
+    *out_count = count;
+    char** unique_items = malloc(sizeof(char*) * (count + 1));
+    int index = 0;
+    for(int i = 0; (*items)[i] != NULL; i++) {
+        int is_duplicate = 0;
+        for(int j = 0; j < index; j++) {
+            if(strcmp((*items)[i], unique_items[j]) == 0) {
+                is_duplicate = 1;
+                *out_count = *out_count - 1;
+                break;
+            }
+        }
+        if(!is_duplicate) {
+            unique_items[index++] = (*items)[i];
+        } else {
+            free((*items)[i]);
+        }
+    }
+    unique_items[index] = NULL;
+
+    free(*items);
+    *items = unique_items;
+}
+

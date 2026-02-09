@@ -118,6 +118,7 @@
 #include <stdint.h>
 #include "linenoise.h"
 #include "multi_completions.h"
+#include "completition_flow.h"
 #include "helpers.h"
 
 #define LINENOISE_DEFAULT_HISTORY_MAX_LEN 100
@@ -678,6 +679,14 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
     char c = keypressed;
 
     completionCallback(ls->buf,&lc);
+
+    size_t new_len = -1;
+    int has_lcps = -1;
+    char** new = apply_completion_flow(ls->buf, lc.len, lc.cvec, &new_len, &has_lcps);
+
+    lc.cvec = new;
+    lc.len = new_len;
+
     if (lc.len == 0) {
         linenoiseBeep();
         ls->in_completion = 0;
@@ -1293,7 +1302,7 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
      * character that should be handled next. */
     if ((l->in_completion || c == 9) && completionCallback != NULL) {
         char** items;
-        int items_count;
+        size_t items_count;
         if(check_multi_completions(l->buf, &items, &items_count)) {
             /* If more than one way to complete,
              * we print a grid list containing 
@@ -1312,7 +1321,7 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
 
                     has_listed = 1;
 
-                    for (int i = 0; i < items_count; i++) {
+                    for (size_t i = 0; i < items_count; i++) {
                         free(items[i]);
                     }
                     free(items);

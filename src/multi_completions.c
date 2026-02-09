@@ -5,44 +5,11 @@
 #include <stdlib.h>
 
 #include "multi_completions.h"
-#include "dynbuf.h"
 #include "helpers.h"
 #include "rehash.h"
 #include "fs.h"
 
-void dedupe(char*** items, int* out_count) {
-    if(*items == NULL) return;
-
-    int count = 0;
-    for(int i = 0; (*items)[i] != NULL; i++) {
-        count++;
-    }
-
-    *out_count = count;
-    char** unique_items = malloc(sizeof(char*) * (count + 1));
-    int index = 0;
-    for(int i = 0; (*items)[i] != NULL; i++) {
-        int is_duplicate = 0;
-        for(int j = 0; j < index; j++) {
-            if(strcmp((*items)[i], unique_items[j]) == 0) {
-                is_duplicate = 1;
-                *out_count = *out_count - 1;
-                break;
-            }
-        }
-        if(!is_duplicate) {
-            unique_items[index++] = (*items)[i];
-        } else {
-            free((*items)[i]);
-        }
-    }
-    unique_items[index] = NULL;
-
-    free(*items);
-    *items = unique_items;
-}
-
-int check_multi_completions(char* buf, char*** items, int* out_count) {
+int check_multi_completions(char* buf, char*** items, size_t* out_count) {
     // Skip leading spaces
     char* start = buf;
     while(*start == ' ') start++;
@@ -96,32 +63,26 @@ int check_multi_completions(char* buf, char*** items, int* out_count) {
         }
     } else {
         *items = list_dir(".", out_count);
+        int write = 0;
 
-        if(*out_count > 1) {
-            // Filter items based on the token
-            int filtered_count = 0;
-            for(int i = 0; (*items)[i] != NULL; i++) {
-                if(strncmp(token, (*items)[i], strlen(token)) == 0) {
-                    filtered_count++;
-                } else {
-                    free((*items)[i]);
-                    (*items)[i] = NULL;
-                }
+        for (int read = 0; (*items)[read] != NULL; read++) {
+            if (strncmp(token, (*items)[read], strlen(token)) == 0) {
+                (*items)[write++] = (*items)[read];
+            } else {
+                free((*items)[read]);
             }
+        }
 
-            if(filtered_count == 0) {
-                free(*items);
-                *items = NULL;
-                return 0;
-            }
+        (*items)[write] = NULL;
+        *out_count = write;
 
-            *out_count = filtered_count;
-            return 1;
-        } else {
+        if (write == 0) {
             free(*items);
             *items = NULL;
             return 0;
         }
+
+        return 1;
     }
 
     return 0;

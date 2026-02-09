@@ -167,14 +167,14 @@ void restore_stderr(int saved_stderr) {
     restore_fd(saved_stderr, STDERR_FILENO);
 }
 
-char** list_dir(const char* dir, int* out_count) {
+char** list_dir(const char* dir, size_t* out_count) {
     *out_count = 0;
 
     DIR* d = opendir(dir);
     if(!d) return NULL;
 
-    int cap = 16;
-    char** items = malloc(sizeof(char*) * cap);
+    size_t cap = 16;
+    char** items = malloc(sizeof(char*) * (cap + 1));
 
     struct dirent* ent;
     while((ent = readdir(d))) {
@@ -185,7 +185,7 @@ char** list_dir(const char* dir, int* out_count) {
 
         if(*out_count >= cap) {
             cap *= 2;
-            items = realloc(items, sizeof(char*) * cap);
+            items = realloc(items, sizeof(char*) * (cap + 1));
         }
 
         DynBuf dynbuf;

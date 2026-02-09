@@ -14,7 +14,7 @@ static void complete_from_filesystem(const char* token, const char* prefix, line
     const char* dir = last_slash ? (last_slash == token ? "/" : strndup(token, last_slash - token)) : ".";
     const char* file_prefix = last_slash ? last_slash + 1 : token;
 
-    int count;
+    size_t count = -1;
     char** items = list_dir(dir, &count);
     if(items) {
         for(int i = 0; items[i]; i++) {
