@@ -38,6 +38,7 @@ void rehash_command_table(void) {
     size_t index = 0;
     command_table_mut = malloc(sizeof(char*) * cap);
     if(!command_table_mut) {
+        free_directories(directories, count);
         return;
     }
 

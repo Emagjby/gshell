@@ -12,7 +12,7 @@
 static void collapse_slashes(char* s) {
     char* w = s;
     for(char* r = s; *r; r++) {
-        if (*r == '/' && (w == s || w[-1] == '/')) {
+        if (*r == '/' && w > s && w[-1] == '/') {
             continue;
         }
         *w++ = *r;
@@ -60,7 +60,10 @@ static void complete_from_filesystem(const char* token, const char* prefix, line
                 }
 
                 dynbuf_append(&dynbuf, name);
-                dynbuf_append(&dynbuf, " ");
+                size_t name_len = strlen(name);
+                if(name_len == 0 || name[name_len - 1] != '/') {
+                    dynbuf_append(&dynbuf, " ");
+                }
 
                 collapse_slashes(dynbuf.buf);
 

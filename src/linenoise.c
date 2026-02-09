@@ -684,6 +684,7 @@ static int completeLine(struct linenoiseState *ls, int keypressed) {
     size_t new_len = -1;
     int has_lcps = -1;
     char** new = apply_completion_flow(ls->buf, lc.len, lc.cvec, &new_len, &has_lcps);
+    freeCompletions(&lc);
 
     lc.cvec = new;
     lc.len = new_len;

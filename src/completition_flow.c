@@ -22,6 +22,8 @@ int filter_by_lcp(char **candidates, const char *lcp) {
     for (int r = 0; candidates[r]; r++) {
         if (strncmp(candidates[r], lcp, len) == 0) {
             candidates[w++] = candidates[r];
+        } else {
+            free(candidates[r]);
         }
     }
 
@@ -32,10 +34,7 @@ int filter_by_lcp(char **candidates, const char *lcp) {
 int cmp_str_len(const void* a, const void* b) {
     const char* str_a = *(const char**)a;
     const char* str_b = *(const char**)b;
-    size_t len_a = strlen(str_a);
-    size_t len_b = strlen(str_b);
-    size_t min_len = len_a < len_b ? len_a : len_b;
-    return strncmp(str_a, str_b, min_len);
+    return strcmp(str_a, str_b);
 }
 
 char** apply_completion_flow(
@@ -58,13 +57,15 @@ char** apply_completion_flow(
     dedupe(&copy, out_count);
 
     // apply lcp calculation to the candidates
-    if(filter_by_lcp(copy, buf) > 0) {
+    int filtered = filter_by_lcp(copy, buf);
+    *out_count = filtered;
+    if(filtered > 0) {
         *has_lcps = 1;
     } else {
         *has_lcps = 0;
     }
 
-    if(has_lcps) {
+    if(*has_lcps) {
         qsort(copy, *out_count, sizeof(char*), cmp_str_len);
         remove_trailing_whitespaces(&copy);
     }

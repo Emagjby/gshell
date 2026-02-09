@@ -167,6 +167,7 @@ void dedupe(char*** items, size_t* out_count) {
 
     *out_count = count;
     char** unique_items = malloc(sizeof(char*) * (count + 1));
+    if(!unique_items) return;
     int index = 0;
     for(int i = 0; (*items)[i] != NULL; i++) {
         int is_duplicate = 0;

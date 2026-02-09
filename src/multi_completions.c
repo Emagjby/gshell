@@ -63,6 +63,10 @@ int check_multi_completions(char* buf, char*** items, size_t* out_count) {
         }
     } else {
         *items = list_dir(".", out_count);
+        if(*items == NULL) {
+            *out_count = 0;
+            return 0;
+        }
         int write = 0;
 
         for (int read = 0; (*items)[read] != NULL; read++) {
