@@ -621,10 +621,12 @@ static void linenoiseBeep(void) {
 /* Free a list of completion option populated by linenoiseAddCompletion(). */
 static void freeCompletions(linenoiseCompletions *lc) {
     size_t i;
-    for (i = 0; i < lc->len; i++)
-        free(lc->cvec[i]);
-    if (lc->cvec != NULL)
+    if(lc->cvec != NULL) {
+        for(i = 0; i < lc->len; i++) {
+            free(lc->cvec[i]);
+        }
         free(lc->cvec);
+    }
 }
 
 /* Called by completeLine() and linenoiseShow() to render the current

@@ -49,6 +49,15 @@ char** apply_completion_flow(
 
     for(size_t i = 0; i < candidates_len; i++) {
         copy[i] = strdup(candidates[i]);
+        if(!copy[i]) {
+            for(size_t j = 0; j < i; j++) {
+                free(copy[j]);
+            }
+            free(copy);
+            *out_count = 0;
+            *has_lcps = 0;
+            return NULL; 
+        }
     }
     copy[candidates_len] = NULL; // Null-terminate the array
 

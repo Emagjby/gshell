@@ -219,6 +219,16 @@ char** list_dir(const char* dir, size_t* out_count) {
         }
 
         items[*out_count] = strdup(dynbuf.buf);
+        if(!items[*out_count]) {
+            dynbuf_free(&dynbuf);
+            for(size_t i = 0; i < *out_count; i++) {
+                free(items[i]);
+            }
+            free(items);
+            closedir(d);
+            *out_count = 0;
+            return NULL;
+        }
         (*out_count)++;
 
         dynbuf_free(&dynbuf);
