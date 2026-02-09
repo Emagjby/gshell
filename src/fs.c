@@ -185,7 +185,17 @@ char** list_dir(const char* dir, size_t* out_count) {
 
         if(*out_count >= cap) {
             cap *= 2;
-            items = realloc(items, sizeof(char*) * (cap + 1));
+            char** tmp = realloc(items, sizeof(char*) * (cap + 1));
+            if(!tmp) {
+                for(size_t i = 0; i < *out_count; i++) {
+                    free(items[i]);
+                }
+                free(items);
+                closedir(d);
+                *out_count = 0;
+                return NULL;
+            }
+            items = tmp;
         }
 
         DynBuf dynbuf;

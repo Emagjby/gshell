@@ -9,16 +9,45 @@
 #include "helpers.h"
 #include "fs.h"
 
+static void collapse_slashes(char* s) {
+    char* w = s;
+    for(char* r = s; *r; r++) {
+        if (*r == '/' && (w == s || w[-1] == '/')) {
+            continue;
+        }
+        *w++ = *r;
+    }
+    *w = 0;
+}
+
 static void complete_from_filesystem(const char* token, const char* prefix, linenoiseCompletions* lc) {
     const char* last_slash = strrchr(token, '/');
-    const char* dir = last_slash ? (last_slash == token ? "/" : strndup(token, last_slash - token)) : ".";
+
+    int dir_allocated = 0;
+    const char* dir;
+    if (!last_slash) {
+        dir = ".";
+    } else if(last_slash == token) {
+        dir = "/";
+    } else {
+        dir = strndup(token, last_slash - token);
+        dir_allocated = 1;
+    }
+
     const char* file_prefix = last_slash ? last_slash + 1 : token;
 
     size_t count = -1;
     char** items = list_dir(dir, &count);
     if(items) {
         for(int i = 0; items[i]; i++) {
-            if(strncmp(file_prefix, items[i], strlen(file_prefix)) == 0) {
+            const char* name = items[i];
+            if (strcmp(dir, ".") != 0) {
+                size_t dir_len = strlen(dir);
+                if (strncmp(items[i], dir, dir_len) == 0 && items[i][dir_len] == '/') {
+                    name = items[i] + dir_len + 1;
+                }
+            }
+            if(strncmp(file_prefix, name, strlen(file_prefix)) == 0) {
                 DynBuf dynbuf;
                 dynbuf_init(&dynbuf);
                 
@@ -30,8 +59,10 @@ static void complete_from_filesystem(const char* token, const char* prefix, line
                     }
                 }
 
-                dynbuf_append(&dynbuf, items[i]);
+                dynbuf_append(&dynbuf, name);
                 dynbuf_append(&dynbuf, " ");
+
+                collapse_slashes(dynbuf.buf);
 
                 linenoiseAddCompletion(lc, dynbuf.buf);
                 dynbuf_free(&dynbuf);
@@ -41,7 +72,7 @@ static void complete_from_filesystem(const char* token, const char* prefix, line
         free(items);
     }
 
-    if(last_slash && dir != token) {
+    if(dir_allocated) {
         free((char*)dir);
     }
 }
@@ -77,7 +108,7 @@ static void completion_callback(const char* buf, linenoiseCompletions* lc) {
 
     if(is_first_token) {
         complete_from_table(token, prefix, lc, builtins);
-        complete_from_table(token, prefix, lc, command_table);
+        if(command_table) complete_from_table(token, prefix, lc, command_table);
     } else {
         complete_from_filesystem(token, prefix, lc);    
     }

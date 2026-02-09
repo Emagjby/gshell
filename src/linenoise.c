@@ -117,6 +117,7 @@
 #include <unistd.h>
 #include <stdint.h>
 #include "linenoise.h"
+
 #include "multi_completions.h"
 #include "completition_flow.h"
 #include "helpers.h"
@@ -656,7 +657,7 @@ static void refreshLineWithCompletion(struct linenoiseState *ls, linenoiseComple
     }
 
     /* Free the completions table if needed. */
-    if (lc != &ctable) freeCompletions(&ctable);
+    if (lc == &ctable) freeCompletions(&ctable);
 }
 
 /* This is an helper function for linenoiseEdit*() and is called when the
@@ -1321,7 +1322,7 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
 
                     has_listed = 1;
 
-                    for (size_t i = 0; i < items_count; i++) {
+                    for (size_t i = 0; items[i]; i++) {
                         free(items[i]);
                     }
                     free(items);
@@ -1354,9 +1355,13 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
             refreshLine(l);
             hintsCallback = hc;
         }
+        has_beeped = 0;
+        has_listed = 0;
         return strdup(l->buf);
     case CTRL_C:     /* ctrl-c */
         errno = EAGAIN;
+        has_beeped = 0;
+        has_listed = 0;
         return NULL;
     case BACKSPACE:   /* backspace */
     case 8:     /* ctrl-h */
@@ -1367,8 +1372,12 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
     case CTRL_D:     /* ctrl-d, remove char at right of cursor, or if the
                         line is empty, act as end-of-file. */
         if (l->len > 0) {
+            has_beeped = 0;
+            has_listed = 0;
             linenoiseEditDelete(l);
         } else {
+            has_beeped = 0;
+            has_listed = 0;
             history_len--;
             free(history[history_len]);
             errno = ENOENT;
@@ -1387,19 +1396,29 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
             memmove(l->buf + prevstart + currlen, l->buf + prevstart, prevlen);
             memcpy(l->buf + prevstart, tmp, currlen);
             if (l->pos + currlen <= l->len) l->pos += currlen;
+            has_beeped = 0;
+            has_listed = 0;
             refreshLine(l);
         }
         break;
     case CTRL_B:     /* ctrl-b */
+        has_beeped = 0;
+        has_listed = 0;
         linenoiseEditMoveLeft(l);
         break;
     case CTRL_F:     /* ctrl-f */
+        has_beeped = 0;
+        has_listed = 0;
         linenoiseEditMoveRight(l);
         break;
     case CTRL_P:    /* ctrl-p */
+        has_beeped = 0;
+        has_listed = 0;
         linenoiseEditHistoryNext(l, LINENOISE_HISTORY_PREV);
         break;
     case CTRL_N:    /* ctrl-n */
+        has_beeped = 0;
+        has_listed = 0;
         linenoiseEditHistoryNext(l, LINENOISE_HISTORY_NEXT);
         break;
     case ESC:    /* escape sequence */
@@ -1408,6 +1427,9 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
          * chars at different times. */
         if (read(l->ifd,seq,1) == -1) break;
         if (read(l->ifd,seq+1,1) == -1) break;
+
+        has_beeped = 0;
+        has_listed = 0;
 
         /* ESC [ sequences. */
         if (seq[0] == '[') {
@@ -1478,26 +1500,38 @@ char *linenoiseEditFeed(struct linenoiseState *l) {
         }
         break;
     case CTRL_U: /* Ctrl+u, delete the whole line. */
+        has_beeped = 0;
+        has_listed = 0;
         l->buf[0] = '\0';
         l->pos = l->len = 0;
         refreshLine(l);
         break;
     case CTRL_K: /* Ctrl+k, delete from current to end of line. */
+        has_beeped = 0;
+        has_listed = 0;
         l->buf[l->pos] = '\0';
         l->len = l->pos;
         refreshLine(l);
         break;
     case CTRL_A: /* Ctrl+a, go to the start of the line */
+        has_beeped = 0;
+        has_listed = 0;
         linenoiseEditMoveHome(l);
         break;
     case CTRL_E: /* ctrl+e, go to the end of the line */
+        has_beeped = 0;
+        has_listed = 0;
         linenoiseEditMoveEnd(l);
         break;
     case CTRL_L: /* ctrl+l, clear screen */
+        has_beeped = 0;
+        has_listed = 0;
         linenoiseClearScreen();
         refreshLine(l);
         break;
     case CTRL_W: /* ctrl+w, delete previous word */
+        has_beeped = 0;
+        has_listed = 0;
         linenoiseEditDeletePrevWord(l);
         break;
     }

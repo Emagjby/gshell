@@ -58,5 +58,5 @@ vcpkg_installed
 compile_commands.json
 .cache/
 
-#99
+# Temporary files for 99
 tmp/

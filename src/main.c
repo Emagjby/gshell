@@ -23,7 +23,6 @@ int main(int argc, char *argv[]) {
     int saved_stdout;
     int saved_stderr;
     char* prompt;
-    const char* const* externals;
   } state;
   repl_linenoise_init();
 
@@ -37,7 +36,6 @@ int main(int argc, char *argv[]) {
     state.command = (Command){0};
     state.saved_stdout = -1;
     state.saved_stderr = -1;
-    state.externals = command_table;
 
     // TODO: support custom prompt
     state.prompt = "$ ";

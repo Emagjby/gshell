@@ -136,12 +136,18 @@ void print_ln_grid(char **items, size_t count) {
     int cols = term_width / col_width;
     if (cols < 1) cols = 1;
 
+    char pad_buf[256];
+    memset(pad_buf, ' ', sizeof(pad_buf));
+
     for (size_t i = 0; i < count; i++) {
         write(STDOUT_FILENO, items[i], strlen(items[i]));
 
         int pad = col_width - strlen(items[i]);
-        for (int j = 0; j < pad; j++)
-            write(STDOUT_FILENO, " ", 1);
+        while(pad > 0){
+            int chunk = pad < (int)sizeof(pad_buf) ? pad : (int)sizeof(pad_buf);
+            write(STDOUT_FILENO, pad_buf, chunk);
+            pad -= chunk;
+        }
 
         if ((i + 1) % cols == 0)
             write(STDOUT_FILENO, "\r\n", 2);

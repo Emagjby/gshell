@@ -30,7 +30,7 @@ int check_multi_completions(char* buf, char*** items, size_t* out_count) {
                 count++;
             }
         }
-        for(int i = 0; command_table[i]; i++) {
+        for(int i = 0; command_table && command_table[i]; i++) {
             if(strncmp(token, command_table[i], strlen(token)) == 0) {
                 count++;
             }
@@ -49,16 +49,16 @@ int check_multi_completions(char* buf, char*** items, size_t* out_count) {
                     (*items)[index++] = strdup(command_table[i]);
                 }
             }
+            (*items)[index] = NULL; // Null-terminate the array
             dedupe(items, out_count);
 
             if(*out_count == 1) {
-                // Only one unique completion, free the array and return 0 to indicate no multi-completions
+                free((*items)[0]);
                 free(*items);
                 *items = NULL;
                 return 0;
             }
 
-            (*items)[index] = NULL; // Null-terminate the array
             return 1;
         }
     } else {

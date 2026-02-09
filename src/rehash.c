@@ -25,7 +25,9 @@ void rehash_command_table(void) {
     free_command_table();
 
     char* path_env = getenv("PATH");
-    if (path_env == NULL) {
+    if (!path_env) {
+        static const char* empty[] = {NULL};
+        command_table = empty;
         error(ERROR_ENVIRONMENT_VARIABLE_NOT_SET, "PATH environment variable not found");
     }
 
@@ -35,6 +37,9 @@ void rehash_command_table(void) {
     size_t cap = 128;
     size_t index = 0;
     command_table_mut = malloc(sizeof(char*) * cap);
+    if(!command_table_mut) {
+        return;
+    }
 
     for (int i = 0; directories[i] != NULL; i++) {
         DIR* dp = opendir(directories[i]);
@@ -45,7 +50,16 @@ void rehash_command_table(void) {
             if (entry->d_type == DT_REG || entry->d_type == DT_LNK) {
                 if (index + 1 >= cap) {
                     cap *= 2;
-                    command_table_mut = realloc(command_table_mut, sizeof(char*) * cap);
+
+                    char** tmp = realloc(command_table_mut, sizeof(char*) * cap);
+                    if (tmp == NULL) {
+                        closedir(dp);
+                        command_table_mut[index] = NULL;
+                        command_table = (const char* const*)command_table_mut;
+                        free_directories(directories, count);
+                        return;
+                    }
+                    command_table_mut = tmp;
                 }
 
                 command_table_mut[index++] = strdup(entry->d_name);
