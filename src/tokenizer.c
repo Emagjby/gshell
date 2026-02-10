@@ -315,7 +315,8 @@ TokenArray tokenize(const char* input) {
             && input[index + 1] != '\''
             && input[index + 1] != '"'
             && input[index + 1] != '\\'
-            && input[index + 1] != '>') {
+            && input[index + 1] != '>'
+            && input[index + 1] != '|') {
         index++;
       } // go to end of token
       

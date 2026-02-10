@@ -11,5 +11,6 @@ typedef struct {
 } Pipeline;
 
 void append_command(Pipeline* pipeline, Command command);
+void free_pipeline(Pipeline* pipeline);
 
 #endif 

@@ -10,6 +10,7 @@
 #include "tokenizer.h"
 #include "parser.h"
 #include "rehash.h"
+#include "pipeline.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;
@@ -55,26 +56,6 @@ int main(int argc, char *argv[]) {
     state.tokenArray = tokenize(state.input);
     state.pipeline = parse(state.tokenArray);
 
-    // handle redirections
-    // TODO: this is a bit hacky, we should handle redirections better
-    if(state.pipeline.count == 1) {
-      if(state.pipeline.commands[0]->stdout_path) {
-        state.saved_stdout = redirect_stdout(state.pipeline.commands[0]->stdout_path, REDIRECT_OUT);
-      }
-
-      if(state.pipeline.commands[0]->stderr_path) {
-        state.saved_stderr = redirect_stderr(state.pipeline.commands[0]->stderr_path, REDIRECT_OUT);
-      }
-
-      if(state.pipeline.commands[0]->stdout_append) {
-        state.saved_stdout = redirect_stdout(state.pipeline.commands[0]->stdout_append, REDIRECT_APPEND);
-      }
-
-      if(state.pipeline.commands[0]->stderr_append) {
-        state.saved_stderr = redirect_stderr(state.pipeline.commands[0]->stderr_append, REDIRECT_APPEND);
-      }
-    }
-
     // execute command
     execute_pipeline(&state.pipeline);
 
@@ -86,7 +67,7 @@ cleanup:
 
     free(state.input);
     free_token_array(&state.tokenArray);
-    // TODO: free pipeline commands
+    free_pipeline(&state.pipeline);
   }
 
   clear_screen();

@@ -2,12 +2,13 @@
 #include <string.h>
 
 #include "error.h"
+#include "redirect.h"
 #include "command.h"
 #include "tokenizer.h"
 
 void handle_redirect(Command* command, TokenArray* tokens, size_t* index, size_t* start, Token* redirect_token) {
     // find path token
-    int path_index = *index + 1;
+    size_t path_index = *index + 1;
     while(path_index < tokens->count && tokens->tokens[path_index].type == TOKEN_WHITESPACE) {
         path_index++;
     }

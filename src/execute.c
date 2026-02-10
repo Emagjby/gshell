@@ -3,7 +3,6 @@
 #include <unistd.h>
 #include <limits.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <sys/wait.h>
 
 #include "argvec.h"
@@ -66,8 +65,35 @@ void execute(Command* command) {
 void execute_pipeline(Pipeline* pipeline) {
   // no right command, execute left only
   if (pipeline->count == 1) {
-    Command command = *pipeline->commands[0];
-    execute(&command);
+    Command* command = pipeline->commands[0];
+    int saved_stdout = -1;
+    int saved_stderr = -1;
+
+    if(command->stdout_path) {
+      saved_stdout = redirect_stdout(command->stdout_path, REDIRECT_OUT);
+    }
+
+    if(command->stderr_path) {
+      saved_stderr = redirect_stderr(command->stderr_path, REDIRECT_OUT);
+    }
+
+    if(command->stdout_append) {
+      saved_stdout = redirect_stdout(command->stdout_append, REDIRECT_APPEND);
+    }
+
+    if(command->stderr_append) {
+      saved_stderr = redirect_stderr(command->stderr_append, REDIRECT_APPEND);
+    }
+
+    execute(command);
+
+    if(saved_stdout != -1) {
+      restore_stdout(saved_stdout);
+    }
+
+    if(saved_stderr != -1) {
+      restore_stderr(saved_stderr);
+    }
     return;
   }
 
@@ -87,6 +113,9 @@ void execute_pipeline(Pipeline* pipeline) {
     free(path);
   }
 
+
+  // WARNING: can cause stack overflow if pipeline is too long, but should be fine for typical use cases
+  // deliberately using VLA for simplicity, but could be changed to dynamic allocation if needed
   int pipes[pipeline->count - 1][2];
 
   for(size_t i = 0; i < pipeline->count - 1; i++) {
@@ -96,11 +125,22 @@ void execute_pipeline(Pipeline* pipeline) {
     }
   }
 
+  size_t spawned = 0;
+
   for(size_t i = 0; i < pipeline->count; i++) {
     pid_t pid = fork();
     if (pid == -1) {
+      for(size_t j = 0; j < pipeline->count - 1; j++) {
+        close(pipes[j][0]);
+        close(pipes[j][1]);
+      }
+
+      for(size_t j = 0; j < spawned; j++) {
+        // TODO: track child PIDs and propagate last command exit status
+        wait(NULL);
+      }
+
       error(ERROR_EXECUTE_ERROR, "Failed to fork process");
-      return;
     } else if (pid == 0) {
       // child process
       if (i > 0) {
@@ -120,6 +160,26 @@ void execute_pipeline(Pipeline* pipeline) {
 
       Command* command = pipeline->commands[i];
 
+      if(command->stdout_path) {
+        redirect_stdout(command->stdout_path, REDIRECT_OUT);
+      }
+
+      if(command->stderr_path) {
+        redirect_stderr(command->stderr_path, REDIRECT_OUT);
+      }
+
+      if(command->stdout_append) {
+        redirect_stdout(command->stdout_append, REDIRECT_APPEND);
+      }
+
+      if(command->stderr_append) {
+        redirect_stderr(command->stderr_append, REDIRECT_APPEND);
+      }
+
+      if(command->argv.args == NULL || command->argv.count == 0 || command->argv.args[0] == NULL) {
+        _exit(0);
+      }
+
       if(is_builtin_command(command->argv.args[0])) {
         execute_builtin(command);
         _exit(0);
@@ -136,12 +196,14 @@ void execute_pipeline(Pipeline* pipeline) {
           _exit(127);
         }
         execve(full_path, command->argv.args, environ);
-        perror("execvp");
+        perror("execve");
         _exit(1);
       }
 
       exit(0);
     }
+
+    spawned++;
   }
 
   for(size_t i = 0; i < pipeline->count - 1; i++) {
@@ -151,6 +213,7 @@ void execute_pipeline(Pipeline* pipeline) {
   }
 
   for(size_t i = 0; i < pipeline->count; i++) {
+    // TODO: track child PIDs and propagate last command exit status
     wait(NULL);
   }
 }

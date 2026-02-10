@@ -19,3 +19,22 @@ void append_command(Pipeline* pipeline, Command command) {
     pipeline->commands = new_commands; 
     pipeline->count = new_count; 
 }
+
+void free_pipeline(Pipeline* pipeline) {
+    if (!pipeline) {
+        return;
+    }
+
+    for (size_t i = 0; i < pipeline->count; i++) {
+        if (!pipeline->commands[i]) {
+            continue;
+        }
+        free_command(pipeline->commands[i]);
+        free(pipeline->commands[i]);
+        pipeline->commands[i] = NULL;
+    }
+
+    free(pipeline->commands);
+    pipeline->commands = NULL;
+    pipeline->count = 0;
+}

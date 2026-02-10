@@ -8,13 +8,12 @@
 #include "argvec.h"
 #include "tokenizer.h"
 #include "dynbuf.h"
-#include "pipeline.h"
 
-char* build_argument(TokenArray* tokens, int start, int end) {
+char* build_argument(TokenArray* tokens, size_t start, size_t end) {
     DynBuf dynbuf;
     dynbuf_init(&dynbuf);
 
-    for (int i = start; i < end; i++) {
+    for (size_t i = start; i < end; i++) {
         Token token = tokens->tokens[i];
         if (token.type == TOKEN_TEXT) {
             dynbuf_append(&dynbuf, token.value);
@@ -119,6 +118,11 @@ Pipeline parse(TokenArray tokens) {
         Token token = tokens.tokens[index];
 
         if(token.type == TOKEN_PIPE || token.type == TOKEN_EOL) {
+            // skip empty command 
+            if(start == index) {
+                start = index + 1;
+                continue;
+            }
             // parse command from tokens[start] to tokens[index - 1]
             Command command = parse_command(&tokens, start, index);
 
@@ -128,6 +132,12 @@ Pipeline parse(TokenArray tokens) {
             // update start to next token
             start = index + 1;
         }
+    }
+
+    // Handle last command if any (just in case no trailing eol, which shouldn't happen)
+    if(start < index) {
+        Command command = parse_command(&tokens, start, index);
+        append_command(&pipeline, command);
     }
 
     return pipeline;
