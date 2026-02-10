@@ -12,6 +12,7 @@
 #include "fs.h"
 #include "commands.h"
 #include "helpers.h"
+#include "history.h"
 
 extern char** environ;
 
@@ -23,6 +24,7 @@ void execute_builtin(Command* command) {
   char* toExec = argv.args[0];
 
   if(strcmp(toExec, "exit") == 0) {
+    history_save();
     exit(0);
   } else if (strcmp(toExec, "echo") == 0) {
     echo_command(argv);

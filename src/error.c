@@ -86,6 +86,9 @@ static void dispatch_error(ErrorType errorType, const char* details) {
         case ERROR_INVALID_ARGUMENT:
              error_generic("Invalid argument:", details);
              break;
+        case ERROR_HISTORY_LOAD:
+            error_generic("Failed to load history:", details);
+            break;
         default:
             error_generic("An unknown error occurred:", details);
             break;

@@ -192,3 +192,12 @@ void dedupe(char*** items, size_t* out_count) {
     *items = unique_items;
 }
 
+int is_number(const char* str) {
+    if (*str == '\0') return 0; 
+    for (const char* p = str; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            return 0; 
+        }
+    }
+    return 1; 
+}
