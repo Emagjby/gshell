@@ -21,9 +21,9 @@ int main(int argc, char *argv[]) {
     char* input;
     TokenArray tokenArray;
     Pipeline pipeline;
+    char* prompt;
     int saved_stdout;
     int saved_stderr;
-    char* prompt;
   } state;
   repl_linenoise_init();
 
@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     state.pipeline = (Pipeline){0};
     state.saved_stdout = -1;
     state.saved_stderr = -1;
-
+    
     // TODO: support custom prompt
     state.prompt = "$ ";
 
@@ -56,14 +56,28 @@ int main(int argc, char *argv[]) {
     state.tokenArray = tokenize(state.input);
     state.pipeline = parse(state.tokenArray);
 
-    // execute command
+    // handle redirections and execute
+    state.saved_stdout = save_stdout();
+    if(state.saved_stdout < 0) {
+      state.saved_stdout = -1;
+    }
+    state.saved_stderr = save_stderr();
+    if(state.saved_stderr < 0) {
+      state.saved_stderr = -1;
+    }
+
     execute_pipeline(&state.pipeline);
 
 cleanup:
+    if(state.saved_stdout != -1) {
+      restore_stdout(state.saved_stdout);
+      state.saved_stdout = -1;
+    }
+    if(state.saved_stderr != -1) {
+      restore_stderr(state.saved_stderr);
+      state.saved_stderr = -1;
+    }
     rehash_command_table();
-
-    if(state.saved_stdout != -1) { restore_stdout(state.saved_stdout); }
-    if(state.saved_stderr != -1) { restore_stderr(state.saved_stderr); }
 
     free(state.input);
     free_token_array(&state.tokenArray);

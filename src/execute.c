@@ -58,42 +58,52 @@ void execute(Command* command) {
     }
 
     run_command(command->argv, found_path);
+    free(found_path);
   }
 }
 
 
 void execute_pipeline(Pipeline* pipeline) {
+  if(pipeline->count == 0) {
+    return;
+  }
+
   // no right command, execute left only
   if (pipeline->count == 1) {
     Command* command = pipeline->commands[0];
-    int saved_stdout = -1;
-    int saved_stderr = -1;
+    int discarded_stdout = -1;
+    int discarded_stderr = -1;
 
     if(command->stdout_path) {
-      saved_stdout = redirect_stdout(command->stdout_path, REDIRECT_OUT);
+      discarded_stdout = redirect_stdout(command->stdout_path, REDIRECT_OUT);
+      if(discarded_stdout != -1) {
+        close(discarded_stdout);
+      }
     }
 
     if(command->stderr_path) {
-      saved_stderr = redirect_stderr(command->stderr_path, REDIRECT_OUT);
+      discarded_stderr = redirect_stderr(command->stderr_path, REDIRECT_OUT);
+      if(discarded_stderr != -1) {
+        close(discarded_stderr);
+      }
     }
 
     if(command->stdout_append) {
-      saved_stdout = redirect_stdout(command->stdout_append, REDIRECT_APPEND);
+      discarded_stdout = redirect_stdout(command->stdout_append, REDIRECT_APPEND);
+      if(discarded_stdout != -1) {
+        close(discarded_stdout);
+      }
     }
 
     if(command->stderr_append) {
-      saved_stderr = redirect_stderr(command->stderr_append, REDIRECT_APPEND);
+      discarded_stderr = redirect_stderr(command->stderr_append, REDIRECT_APPEND);
+      if(discarded_stderr != -1) {
+        close(discarded_stderr);
+      }
     }
 
     execute(command);
 
-    if(saved_stdout != -1) {
-      restore_stdout(saved_stdout);
-    }
-
-    if(saved_stderr != -1) {
-      restore_stderr(saved_stderr);
-    }
     return;
   }
 
@@ -120,8 +130,12 @@ void execute_pipeline(Pipeline* pipeline) {
 
   for(size_t i = 0; i < pipeline->count - 1; i++) {
     if (pipe(pipes[i]) == -1) {
+      for(size_t j = 0; j < i; j++) {
+        close(pipes[j][0]);
+        close(pipes[j][1]);
+      }
+
       error(ERROR_EXECUTE_ERROR, "Failed to create pipe");
-      return;
     }
   }
 
