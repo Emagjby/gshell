@@ -8,7 +8,7 @@
 #include "error.h"
 #include "dynbuf.h"
 
-const char* builtins[] = {"cd", "exit", "clear", "type", "echo", "pwd", NULL};
+const char* builtins[] = {"cd", "exit", "clear", "type", "echo", "pwd", "history", NULL};
 
 void clear_screen(void) {
     write(STDOUT_FILENO, "\033[2J\033[H", 7);

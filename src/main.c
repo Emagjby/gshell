@@ -11,6 +11,7 @@
 #include "parser.h"
 #include "rehash.h"
 #include "pipeline.h"
+#include "history.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;
@@ -26,6 +27,7 @@ int main(int argc, char *argv[]) {
     int saved_stderr;
   } state;
   repl_linenoise_init();
+  history_init();
 
   clear_screen();
 
@@ -51,6 +53,8 @@ int main(int argc, char *argv[]) {
     if(!state.input) {
       goto cleanup;
     }
+
+    history_add(state.input);
 
     // process input
     state.tokenArray = tokenize(state.input);
