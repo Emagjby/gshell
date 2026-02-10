@@ -142,6 +142,10 @@ static char **history = NULL;
 static int has_listed = 0;
 static int has_beeped = 0;
 
+char** get_history(void) {
+    return history;
+}
+
 /* =========================== UTF-8 support ================================ */
 
 /* Return the number of bytes that compose the UTF-8 character starting at

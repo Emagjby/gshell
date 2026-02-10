@@ -35,7 +35,9 @@ void execute_builtin(Command* command) {
     pwd_command();
   } else if (strcmp(toExec, "cd") == 0) {
     cd_command(argv);
-  } 
+  } else if (strcmp(toExec, "history") == 0) {
+    history_command(argv);
+  }
 }
 
 void execute(Command* command) {

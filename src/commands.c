@@ -10,6 +10,7 @@
 #include "commands.h"
 #include "error.h"
 #include "dynbuf.h"
+#include "linenoise.h"
 
 void type_command(ArgVec argv) {
   if (argv.count < 2) {
@@ -40,6 +41,67 @@ void type_command(ArgVec argv) {
   } else {
     unknown_type(argv.args[1]);
   }
+}
+
+static void append_history(DynBuf* dynbuf) {
+  char** history = get_history();
+  if(!history) {
+    return;
+  }
+
+  for(size_t i = 0; history[i]; i++) {
+    char num[64];
+    snprintf(num, sizeof(num), "%4zu ", i + 1);
+    dynbuf_append(dynbuf, num);
+    dynbuf_append(dynbuf, history[i]);
+    dynbuf_append(dynbuf, "\n");
+  }
+}
+
+static void append_last_n_history(DynBuf* dynbuf, size_t n) {
+  char** history = get_history();
+  if(!history) {
+    return;
+  }
+
+  size_t start = 0;
+  for(size_t i = 0; history[i]; i++) {
+    start = i + 1;
+  }
+
+  if (n > start) {
+    n = start;
+  }
+
+  for(size_t i = start - n; i < start; i++) {
+    char num[64];
+    snprintf(num, sizeof(num), "%4zu ", i + 1);
+    dynbuf_append(dynbuf, num);
+    dynbuf_append(dynbuf, history[i]);
+    dynbuf_append(dynbuf, "\n");
+  }
+}
+
+void history_command(ArgVec argv) {
+  DynBuf dynbuf;
+  dynbuf_init(&dynbuf);
+
+  if(argv.count > 1) {
+    // turn the arg to a num
+    char* endptr;
+    long num = strtol(argv.args[1], &endptr, 10);
+    if (*endptr != '\0' || num <= 0) {
+      dynbuf_free(&dynbuf);
+      error(ERROR_INVALID_ARGUMENT, argv.args[1]);
+    }
+
+    append_last_n_history(&dynbuf, (size_t)num);
+  } else {
+    append_history(&dynbuf);
+  }
+
+  write(STDOUT_FILENO, dynbuf.buf, dynbuf.len);
+  dynbuf_free(&dynbuf);
 }
 
 void clear_command() {

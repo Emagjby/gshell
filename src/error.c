@@ -83,6 +83,9 @@ static void dispatch_error(ErrorType errorType, const char* details) {
         case ERROR_EXECUTE_ERROR:
              error_generic("Execution error:", details);
              break;
+        case ERROR_INVALID_ARGUMENT:
+             error_generic("Invalid argument:", details);
+             break;
         default:
             error_generic("An unknown error occurred:", details);
             break;
