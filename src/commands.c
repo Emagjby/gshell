@@ -45,6 +45,9 @@ void type_command(ArgVec argv) {
 
 static void append_history(DynBuf* dynbuf) {
   char** history = get_history();
+  if(!history) {
+    return;
+  }
 
   for(size_t i = 0; history[i]; i++) {
     char num[64];
@@ -57,6 +60,9 @@ static void append_history(DynBuf* dynbuf) {
 
 static void append_last_n_history(DynBuf* dynbuf, size_t n) {
   char** history = get_history();
+  if(!history) {
+    return;
+  }
 
   size_t start = 0;
   for(size_t i = 0; history[i]; i++) {
@@ -83,13 +89,13 @@ void history_command(ArgVec argv) {
   if(argv.count > 1) {
     // turn the arg to a num
     char* endptr;
-    size_t num = strtol(argv.args[1], &endptr, 10);
+    long num = strtol(argv.args[1], &endptr, 10);
     if (*endptr != '\0' || num <= 0) {
+      dynbuf_free(&dynbuf);
       error(ERROR_INVALID_ARGUMENT, argv.args[1]);
-      return;
     }
 
-    append_last_n_history(&dynbuf, num);
+    append_last_n_history(&dynbuf, (size_t)num);
   } else {
     append_history(&dynbuf);
   }
