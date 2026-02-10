@@ -5,5 +5,6 @@
 
 void history_init(void);
 void history_add(const char* line);
+void history_save(void);
 
 #endif

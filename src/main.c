@@ -89,5 +89,6 @@ cleanup:
   }
 
   clear_screen();
+  history_save();
   return 0;
 }
