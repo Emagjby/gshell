@@ -47,7 +47,7 @@ void clear_command() {
 }
 
 void echo_command(ArgVec argv) {
-  for(int i = 1; i < argv.count; i++) {
+  for(size_t i = 1; i < argv.count; i++) {
     write(STDOUT_FILENO, argv.args[i], strlen(argv.args[i]));
     if (i < argv.count - 1) {
       write(STDOUT_FILENO, " ", 1);

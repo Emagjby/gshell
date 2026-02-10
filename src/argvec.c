@@ -4,7 +4,7 @@
 #include "argvec.h"
 
 void double_argvec_capacity(ArgVec* argv) {
-    int new_cap = argv->cap ? argv->cap * 2 : 8;
+    size_t new_cap = argv->cap ? argv->cap * 2 : 8;
     char** new_args = realloc(argv->args, sizeof(char*) * new_cap);
     if(!new_args) {
         abort(); // Handle memory allocation failure
@@ -35,7 +35,7 @@ void append_arg_end(ArgVec* argv) {
 }
 
 void free_argvec(ArgVec* argv) {
-    for (int i = 0; i < argv->count; i++) {
+    for (size_t i = 0; i < argv->count; i++) {
         free(argv->args[i]);
     }
     free(argv->args);

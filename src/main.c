@@ -10,6 +10,7 @@
 #include "tokenizer.h"
 #include "parser.h"
 #include "rehash.h"
+#include "pipeline.h"
 
 int main(int argc, char *argv[]) {
   (void)argc;
@@ -19,10 +20,10 @@ int main(int argc, char *argv[]) {
   static struct {
     char* input;
     TokenArray tokenArray;
-    Command command;
+    Pipeline pipeline;
+    char* prompt;
     int saved_stdout;
     int saved_stderr;
-    char* prompt;
   } state;
   repl_linenoise_init();
 
@@ -33,10 +34,10 @@ int main(int argc, char *argv[]) {
     // prepare state
     state.input = NULL;
     state.tokenArray = (TokenArray){0};
-    state.command = (Command){0};
+    state.pipeline = (Pipeline){0};
     state.saved_stdout = -1;
     state.saved_stderr = -1;
-
+    
     // TODO: support custom prompt
     state.prompt = "$ ";
 
@@ -53,37 +54,34 @@ int main(int argc, char *argv[]) {
 
     // process input
     state.tokenArray = tokenize(state.input);
-    state.command = parse(state.tokenArray);
+    state.pipeline = parse(state.tokenArray);
 
-    // handle redirections
-    if(state.command.stdout_path) {
-      state.saved_stdout = redirect_stdout(state.command.stdout_path, REDIRECT_OUT);
+    // handle redirections and execute
+    state.saved_stdout = save_stdout();
+    if(state.saved_stdout < 0) {
+      state.saved_stdout = -1;
+    }
+    state.saved_stderr = save_stderr();
+    if(state.saved_stderr < 0) {
+      state.saved_stderr = -1;
     }
 
-    if(state.command.stderr_path) {
-      state.saved_stderr = redirect_stderr(state.command.stderr_path, REDIRECT_OUT);
-    }
-
-    if(state.command.stdout_append) {
-      state.saved_stdout = redirect_stdout(state.command.stdout_append, REDIRECT_APPEND);
-    }
-
-    if(state.command.stderr_append) {
-      state.saved_stderr = redirect_stderr(state.command.stderr_append, REDIRECT_APPEND);
-    }
-
-    // execute command
-    execute(&state.command);
+    execute_pipeline(&state.pipeline);
 
 cleanup:
+    if(state.saved_stdout != -1) {
+      restore_stdout(state.saved_stdout);
+      state.saved_stdout = -1;
+    }
+    if(state.saved_stderr != -1) {
+      restore_stderr(state.saved_stderr);
+      state.saved_stderr = -1;
+    }
     rehash_command_table();
-
-    if(state.saved_stdout != -1) { restore_stdout(state.saved_stdout); }
-    if(state.saved_stderr != -1) { restore_stderr(state.saved_stderr); }
 
     free(state.input);
     free_token_array(&state.tokenArray);
-    free_command(&state.command);
+    free_pipeline(&state.pipeline);
   }
 
   clear_screen();

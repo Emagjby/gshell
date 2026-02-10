@@ -155,12 +155,20 @@ int redirect_stdout(const char* path, RedirectType append) {
     return redirect_fd(STDOUT_FILENO, path, append);
 }
 
+int save_stdout(void) {
+    return ensure_fd_ge3(dup(STDOUT_FILENO));
+}
+
 void restore_stdout(int saved_stdout) {
     restore_fd(saved_stdout, STDOUT_FILENO);
 }
 
 int redirect_stderr(const char* path, RedirectType append) {
     return redirect_fd(STDERR_FILENO, path, append);
+}
+
+int save_stderr(void) {
+    return ensure_fd_ge3(dup(STDERR_FILENO));
 }
 
 void restore_stderr(int saved_stderr) {
@@ -238,4 +246,3 @@ char** list_dir(const char* dir, size_t* out_count) {
     closedir(d);
     return items;
 }
-

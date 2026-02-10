@@ -1,10 +1,12 @@
 #ifndef ARGVEC_H_
 #define ARGVEC_H_
 
+#include <stdlib.h>
+
 typedef struct {
     char** args;
-    int count;
-    int cap;
+    size_t count;
+    size_t cap;
 } ArgVec;
 
 void double_argvec_capacity(ArgVec* argv);

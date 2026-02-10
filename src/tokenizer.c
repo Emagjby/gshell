@@ -8,7 +8,7 @@
 #include "error.h"
 
 void free_token_array(TokenArray* tokenArray) {
-  for (int i = 0; i < tokenArray->count; i++) {
+  for (size_t i = 0; i < tokenArray->count; i++) {
     free(tokenArray->tokens[i].value);
   }
   free(tokenArray->tokens);
@@ -175,7 +175,24 @@ TokenArray tokenize(const char* input) {
           continue;
         }
       }
-    }
+    } else if(input[index] == '|') {
+        // build pipe token
+        Token token;
+        token.value = malloc(2);
+        if(!token.value) {
+          abort(); // Handle memory allocation failure
+        }
+        token.value[0] = '|';
+        token.value[1] = '\0';
+        token.type = TOKEN_PIPE;
+
+        // append token
+        append_token(&tokenArray, token);
+
+
+        start = index + 1;
+        continue;
+      } 
 
     // otherwise, process normal tokens
     if(input[index] == '\'') {
@@ -298,7 +315,8 @@ TokenArray tokenize(const char* input) {
             && input[index + 1] != '\''
             && input[index + 1] != '"'
             && input[index + 1] != '\\'
-            && input[index + 1] != '>') {
+            && input[index + 1] != '>'
+            && input[index + 1] != '|') {
         index++;
       } // go to end of token
       

@@ -10,8 +10,10 @@ typedef enum {
     ERROR_UNTERMINATED_QUOTE,
     ERROR_PARSING_FAILED,
     ERROR_FILE_OPERATION_FAILED,
+    ERROR_EXECUTE_ERROR,
 } ErrorType;
 
 void error(ErrorType errorType, const char* details);
+void error_no_panic(ErrorType errorType, const char* details);
 
 #endif
