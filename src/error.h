@@ -11,7 +11,8 @@ typedef enum {
     ERROR_PARSING_FAILED,
     ERROR_FILE_OPERATION_FAILED,
     ERROR_EXECUTE_ERROR,
-    ERROR_INVALID_ARGUMENT
+    ERROR_INVALID_ARGUMENT,
+    ERROR_HISTORY_LOAD
 } ErrorType;
 
 void error(ErrorType errorType, const char* details);

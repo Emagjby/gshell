@@ -82,20 +82,51 @@ static void append_last_n_history(DynBuf* dynbuf, size_t n) {
   }
 }
 
+static void history_read_command(ArgVec argv) {
+  if (argv.count < 3) {
+    error(ERROR_INSUFFICIENT_ARGUMENTS, "history -r");
+  }
+
+  char* filename = argv.args[2];
+  if (linenoiseHistoryLoad(filename) != 0) {
+    error(ERROR_HISTORY_LOAD, filename);
+  }
+}
+
+static void history_write_command(ArgVec argv) {
+  if (argv.count < 3) {
+    error(ERROR_INSUFFICIENT_ARGUMENTS, "history -w");
+  }
+
+  char* filename = argv.args[2];
+  if (linenoiseHistorySave(filename) != 0) {
+    error(ERROR_FILE_OPERATION_FAILED, filename);
+  }
+}
+
 void history_command(ArgVec argv) {
   DynBuf dynbuf;
   dynbuf_init(&dynbuf);
 
   if(argv.count > 1) {
-    // turn the arg to a num
-    char* endptr;
-    long num = strtol(argv.args[1], &endptr, 10);
-    if (*endptr != '\0' || num <= 0) {
+    if(strcmp(argv.args[1], "-r") == 0) {
+      history_read_command(argv);
+    } else if(strcmp(argv.args[1], "-w") == 0) {
+      history_write_command(argv);
+    } else if(is_number(argv.args[1])) {
+      // turn the arg to a num
+      char* endptr;
+      long num = strtol(argv.args[1], &endptr, 10);
+      if (*endptr != '\0' || num <= 0) {
+        dynbuf_free(&dynbuf);
+        error(ERROR_INVALID_ARGUMENT, argv.args[1]);
+      }
+
+      append_last_n_history(&dynbuf, (size_t)num);
+    } else {
       dynbuf_free(&dynbuf);
       error(ERROR_INVALID_ARGUMENT, argv.args[1]);
     }
-
-    append_last_n_history(&dynbuf, (size_t)num);
   } else {
     append_history(&dynbuf);
   }
