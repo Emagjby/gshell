@@ -3,10 +3,10 @@ use std::pin::Pin;
 use crate::{
     builtins::BuiltinRegistry,
     parser::ParsedCommand,
-    shell::{CommandOutput, ExitCode, SharedShellState, ShellResult},
+    shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellResult},
 };
 
-pub type ExecutorFuture<'a> = Pin<Box<dyn Future<Output = ShellResult<CommandOutput>> + Send + 'a>>;
+pub type ExecutorFuture<'a> = Pin<Box<dyn Future<Output = ShellResult<ShellAction>> + Send + 'a>>;
 
 pub trait Executor<C>: Send + Sync {
     fn execute<'a>(&'a self, state: SharedShellState, command: &'a C) -> ExecutorFuture<'a>;
@@ -23,7 +23,7 @@ impl Executor<ParsedCommand> for BootstrapExecutor {
     ) -> ExecutorFuture<'a> {
         Box::pin(async move {
             match command {
-                ParsedCommand::Empty | ParsedCommand::Exit => Ok(CommandOutput::success()),
+                ParsedCommand::Empty => Ok(ShellAction::continue_with(CommandOutput::success())),
                 ParsedCommand::Raw(input) => {
                     let parts = input
                         .split_whitespace()
@@ -38,10 +38,11 @@ impl Executor<ParsedCommand> for BootstrapExecutor {
                         }
                     }
 
-                    Ok(CommandOutput::failure(
-                        ExitCode::FAILURE,
-                        format!("command not found: {}", input),
-                    ))
+                    Ok(ShellAction::continue_with(CommandOutput {
+                        exit_code: ExitCode::FAILURE,
+                        stdout: String::new(),
+                        stderr: format!("command not found: {input}\n"),
+                    }))
                 }
             }
         })

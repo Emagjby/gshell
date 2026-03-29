@@ -1,12 +1,24 @@
+mod cd;
+mod clear;
+mod echo;
+mod exit;
 mod history;
+mod pwd;
+mod r#type;
 
+pub use cd::CdBuiltin;
+pub use clear::ClearBuiltin;
+pub use echo::EchoBuiltin;
+pub use exit::ExitBuiltin;
 pub use history::HistoryBuiltin;
+pub use pwd::PwdBuiltin;
+pub use r#type::TypeBuiltin;
 
-use std::{collections::HashMap, pin::Pin, sync::Arc};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
-use crate::shell::{CommandOutput, SharedShellState, ShellResult};
+use crate::shell::{SharedShellState, ShellAction, ShellResult};
 
-pub type BuiltinFuture<'a> = Pin<Box<dyn Future<Output = ShellResult<CommandOutput>> + Send + 'a>>;
+pub type BuiltinFuture<'a> = Pin<Box<dyn Future<Output = ShellResult<ShellAction>> + Send + 'a>>;
 
 pub trait Builtin: Send + Sync {
     fn name(&self) -> &'static str;
@@ -26,6 +38,12 @@ impl BuiltinRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Arc::new(HistoryBuiltin));
+        registry.register(Arc::new(CdBuiltin));
+        registry.register(Arc::new(PwdBuiltin));
+        registry.register(Arc::new(EchoBuiltin));
+        registry.register(Arc::new(ClearBuiltin));
+        registry.register(Arc::new(TypeBuiltin));
+        registry.register(Arc::new(ExitBuiltin));
         registry
     }
 

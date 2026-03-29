@@ -7,7 +7,7 @@ use crate::{
     parser::{ParsedCommand, Parser},
     prompt::{FallbackPromptRenderer, ReedlinePromptAdapter},
     runtime::Executor,
-    shell::{ExitCode, SharedShellState, ShellError, ShellResult},
+    shell::{ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
 };
 
 pub struct Repl<E> {
@@ -110,12 +110,8 @@ where
                         .push(buf.trim().to_string());
                 }
 
-                if matches!(command, ParsedCommand::Exit) {
-                    return ReplFlow::Break;
-                }
-
                 match self.executor.execute(state.clone(), &command).await {
-                    Ok(output) => {
+                    Ok(ShellAction::Continue(output)) => {
                         if !output.stdout.is_empty() {
                             print!("{}", output.stdout);
                         }
@@ -125,6 +121,10 @@ where
                         }
 
                         state.write().await.set_last_exit_status(output.exit_code);
+                    }
+                    Ok(ShellAction::Exit(code)) => {
+                        state.write().await.set_last_exit_status(code);
+                        return ReplFlow::Break;
                     }
                     Err(err) => {
                         eprintln!("{err}");
