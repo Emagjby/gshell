@@ -58,3 +58,13 @@ pub enum RedirectionKind {
     OutputTruncate,
     OutputAppend,
 }
+
+impl Redirection {
+    pub fn effective_fd(&self) -> u8 {
+        match (&self.fd, &self.kind) {
+            (Some(fd), _) => *fd as u8,
+            (None, RedirectionKind::Input) => 0,
+            (None, RedirectionKind::OutputTruncate | RedirectionKind::OutputAppend) => 1,
+        }
+    }
+}
