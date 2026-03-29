@@ -1,4 +1,5 @@
 use anyhow::Result;
+use gshell::{runtime::BootstrapExecutor, shell::ShellState, ui::Repl};
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::main]
@@ -7,9 +8,11 @@ async fn main() -> Result<()> {
 
     tracing::info!("starting gshell...");
 
-    // Phase 1 includes bootstrapping only
-    // REPL will come in P1-03
-    println!("gshell bootstrap ready");
+    let state = ShellState::shared()?;
+    let executor = BootstrapExecutor;
+    let mut repl = Repl::new(executor);
+
+    repl.run(state).await?;
 
     Ok(())
 }
