@@ -16,6 +16,9 @@ help:
 	@printf "  make validate     - check + test + lint\n"
 	@printf "  make run          - cargo run\n"
 	@printf "  make clean        - cargo clean\n"
+	@printf "  make bench        - cargo bench\n"
+	@printf "  make build-release - cargo build --release\n"
+	@printf "  make validate-full - check + test + lint + release + bench\n"
 	@printf "\n"
 
 .PHONY: check
@@ -51,3 +54,14 @@ run:
 .PHONY: clean
 clean:
 	$(CARGO) clean
+
+.PHONY: bench
+bench:
+	$(CARGO) bench
+
+.PHONY: build-release
+build-release:
+	$(CARGO) build --release
+
+.PHONY: validate-full
+validate-full: check test lint build-release bench

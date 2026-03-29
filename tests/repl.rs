@@ -158,3 +158,17 @@ async fn external_command_runs_through_repl_core() {
     assert_eq!(flow, ReplFlow::Continue);
     assert!(state.read().await.last_exit_status().is_failure());
 }
+
+#[tokio::test]
+async fn echo_command_through_repl_core_updates_exit_status() {
+    let executor = gshell::runtime::BootstrapExecutor;
+    let core = ReplCore::new(executor);
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let flow = core
+        .handle_signal(Signal::Success("echo hello".to_string()), state.clone())
+        .await;
+
+    assert_eq!(flow, ReplFlow::Continue);
+    assert_eq!(state.read().await.last_exit_status(), ExitCode::SUCCESS);
+}
