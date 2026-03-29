@@ -2,7 +2,7 @@ use gshell::history::{HistoryConfig, should_record_history_entry};
 use gshell::shell::HistoryState;
 use gshell::{
     builtins::{Builtin, HistoryBuiltin},
-    shell::ShellState,
+    shell::{ShellAction, ShellState},
 };
 
 use std::path::PathBuf;
@@ -51,6 +51,11 @@ async fn history_builtin_outputs_entries() {
         .await
         .expect("history builtin should execute");
 
-    assert!(output.stdout.contains("echo hello"));
-    assert!(output.stdout.contains("history"));
+    match output {
+        ShellAction::Continue(command_output) => {
+            assert!(command_output.stdout.contains("echo hello"));
+            assert!(command_output.stdout.contains("history"));
+        }
+        ShellAction::Exit(_) => panic!("history builtin should not exit"),
+    }
 }

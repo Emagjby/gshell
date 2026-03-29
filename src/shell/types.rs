@@ -64,3 +64,19 @@ impl Default for CommandOutput {
         Self::success()
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellAction {
+    Continue(CommandOutput),
+    Exit(ExitCode),
+}
+
+impl ShellAction {
+    pub fn continue_with(output: CommandOutput) -> Self {
+        Self::Continue(output)
+    }
+
+    pub fn exit(code: ExitCode) -> Self {
+        Self::Exit(code)
+    }
+}

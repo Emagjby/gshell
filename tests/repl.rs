@@ -4,7 +4,7 @@ use gshell::{
     parser::ParsedCommand,
     prompt::{FallbackPromptRenderer, Prompt, ReedlinePromptAdapter},
     runtime::{Executor, ExecutorFuture},
-    shell::{CommandOutput, ExitCode, SharedShellState, ShellState},
+    shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellState},
     ui::{ReplCore, ReplFlow},
 };
 use reedline::Signal;
@@ -33,7 +33,7 @@ impl Executor<ParsedCommand> for RecordingExecutor {
                 .lock()
                 .expect("calls lock poisoned")
                 .push(command.clone());
-            Ok(CommandOutput::success())
+            Ok(ShellAction::continue_with(CommandOutput::success()))
         })
     }
 }
@@ -73,8 +73,8 @@ async fn empty_line_redraws_prompt() {
 
 #[tokio::test]
 async fn explicit_exit_terminates_session_cleanly() {
-    let executor = RecordingExecutor::default();
-    let core = ReplCore::new(executor.clone());
+    let executor = gshell::runtime::BootstrapExecutor;
+    let core = ReplCore::new(executor);
     let state = ShellState::shared().await.expect("state should initialize");
 
     let flow = core
@@ -82,7 +82,6 @@ async fn explicit_exit_terminates_session_cleanly() {
         .await;
 
     assert_eq!(flow, ReplFlow::Break);
-    assert!(executor.calls().is_empty());
     assert_eq!(state.read().await.last_exit_status(), ExitCode::SUCCESS);
 }
 
@@ -117,4 +116,27 @@ async fn prompt_still_available_after_command_execution() {
     prompt.refresh(state).await;
 
     assert_eq!(prompt.render_prompt_left(), "$ ");
+}
+
+#[tokio::test]
+async fn cd_followed_by_pwd_updates_shell_state() {
+    let executor = gshell::runtime::BootstrapExecutor;
+    let core = ReplCore::new(executor);
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let tmp = tempfile::tempdir().expect("temp dir should be created");
+    let cmd = format!("cd {}", tmp.path().display());
+
+    let flow = core
+        .handle_signal(Signal::Success(cmd), state.clone())
+        .await;
+
+    assert_eq!(flow, ReplFlow::Continue);
+    assert_eq!(state.read().await.cwd(), tmp.path());
+
+    let flow = core
+        .handle_signal(Signal::Success("pwd".to_string()), state.clone())
+        .await;
+
+    assert_eq!(flow, ReplFlow::Continue);
 }

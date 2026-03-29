@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gshell::builtins::{Builtin, BuiltinFuture, BuiltinRegistry};
-use gshell::shell::{CommandOutput, ExitCode, SharedShellState, ShellState};
+use gshell::shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellState};
 
 struct TestBuiltin;
 
@@ -11,7 +11,7 @@ impl Builtin for TestBuiltin {
     }
 
     fn execute<'a>(&'a self, _state: SharedShellState, _args: &'a [String]) -> BuiltinFuture<'a> {
-        Box::pin(async { Ok(CommandOutput::success()) })
+        Box::pin(async { Ok(ShellAction::continue_with(CommandOutput::success())) })
     }
 }
 
