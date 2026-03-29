@@ -42,7 +42,7 @@ impl Executor<ParsedCommand> for RecordingExecutor {
 async fn shell_launces_and_waits_for_input() {
     let executor = RecordingExecutor::default();
     let core = ReplCore::new(executor.clone());
-    let state = ShellState::shared().expect("state should initialize");
+    let state = ShellState::shared().await.expect("state should initialize");
 
     let flow = core
         .handle_signal(Signal::Success("echo hello".to_string()), state.clone())
@@ -53,20 +53,14 @@ async fn shell_launces_and_waits_for_input() {
         executor.calls(),
         vec![ParsedCommand::Raw("echo hello".to_string())]
     );
-    assert_eq!(
-        state
-            .read()
-            .expect("state lock should be readable")
-            .last_exit_status(),
-        ExitCode::SUCCESS
-    );
+    assert_eq!(state.read().await.last_exit_status(), ExitCode::SUCCESS);
 }
 
 #[tokio::test]
 async fn empty_line_redraws_prompt() {
     let executor = RecordingExecutor::default();
     let core = ReplCore::new(executor.clone());
-    let state = ShellState::shared().expect("state should initialize");
+    let state = ShellState::shared().await.expect("state should initialize");
 
     let flow = core
         .handle_signal(Signal::Success(String::new()), state.clone())
@@ -74,20 +68,14 @@ async fn empty_line_redraws_prompt() {
 
     assert_eq!(flow, ReplFlow::Continue);
     assert!(executor.calls().is_empty());
-    assert_eq!(
-        state
-            .read()
-            .expect("state lock should be readable")
-            .last_exit_status(),
-        ExitCode::SUCCESS
-    );
+    assert_eq!(state.read().await.last_exit_status(), ExitCode::SUCCESS);
 }
 
 #[tokio::test]
 async fn explicit_exit_terminates_session_cleanly() {
     let executor = RecordingExecutor::default();
     let core = ReplCore::new(executor.clone());
-    let state = ShellState::shared().expect("state should initialize");
+    let state = ShellState::shared().await.expect("state should initialize");
 
     let flow = core
         .handle_signal(Signal::Success("exit".to_string()), state.clone())
@@ -95,19 +83,13 @@ async fn explicit_exit_terminates_session_cleanly() {
 
     assert_eq!(flow, ReplFlow::Break);
     assert!(executor.calls().is_empty());
-    assert_eq!(
-        state
-            .read()
-            .expect("state lock should be readable")
-            .last_exit_status(),
-        ExitCode::SUCCESS
-    );
+    assert_eq!(state.read().await.last_exit_status(), ExitCode::SUCCESS);
 }
 
 #[tokio::test]
 async fn prompt_shows_dollar_space() {
     let renderer = std::sync::Arc::new(FallbackPromptRenderer);
-    let state = ShellState::shared().expect("state should initialize");
+    let state = ShellState::shared().await.expect("state should initialize");
     let mut prompt = ReedlinePromptAdapter::new(renderer);
 
     prompt.refresh(state).await;
@@ -118,7 +100,7 @@ async fn prompt_shows_dollar_space() {
 #[tokio::test]
 async fn prompt_still_available_after_command_execution() {
     let renderer = std::sync::Arc::new(FallbackPromptRenderer);
-    let state = ShellState::shared().expect("state should initialize");
+    let state = ShellState::shared().await.expect("state should initialize");
     let mut prompt = ReedlinePromptAdapter::new(renderer);
 
     prompt.refresh(state.clone()).await;

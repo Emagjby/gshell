@@ -8,9 +8,9 @@ async fn main() -> Result<()> {
 
     tracing::info!("starting gshell...");
 
-    let state = ShellState::shared()?;
+    let state = ShellState::shared().await?;
     let executor = BootstrapExecutor;
-    let mut repl = Repl::new(executor);
+    let mut repl = Repl::new(executor, state.clone()).await;
 
     repl.run(state).await?;
 

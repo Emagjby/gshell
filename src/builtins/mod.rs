@@ -1,3 +1,7 @@
+mod history;
+
+pub use history::HistoryBuiltin;
+
 use std::{collections::HashMap, pin::Pin, sync::Arc};
 
 use crate::shell::{CommandOutput, SharedShellState, ShellResult};
@@ -17,6 +21,12 @@ pub struct BuiltinRegistry {
 impl BuiltinRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_defaults() -> Self {
+        let mut registry = Self::new();
+        registry.register(Arc::new(HistoryBuiltin));
+        registry
     }
 
     pub fn register(&mut self, builtin: Arc<dyn Builtin>) -> Option<Arc<dyn Builtin>> {
