@@ -1,7 +1,6 @@
 use crate::{
-    ast::{CommandNode, Redirection, RedirectionKind, ShellExpr, SimpleCommand},
+    ast::{BoolOp, CommandNode, Redirection, RedirectionKind, ShellExpr, SimpleCommand},
     lexer::{Lexer, Token},
-    shell::{ShellError, ShellResult},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,230 +9,283 @@ pub enum ParsedCommand {
     Expr(ShellExpr),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseErrorKind {
+    Invalid,
+    Incomplete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseError {
+    pub kind: ParseErrorKind,
+    pub message: String,
+}
+
+pub type ParseResult<T> = Result<T, ParseError>;
+
+impl ParseError {
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self {
+            kind: ParseErrorKind::Invalid,
+            message: message.into(),
+        }
+    }
+
+    pub fn incomplete(message: impl Into<String>) -> Self {
+        Self {
+            kind: ParseErrorKind::Incomplete,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for ParseError {}
+
 #[derive(Debug, Default)]
 pub struct Parser {
     lexer: Lexer,
 }
 
 impl Parser {
-    pub fn parse(&self, input: &str) -> ShellResult<ParsedCommand> {
+    pub fn parse(&self, input: &str) -> ParseResult<ParsedCommand> {
         if input.contains('\0') {
-            return Err(ShellError::message("input contains a null byte"));
+            return Err(ParseError::invalid("input contains a null byte"));
         }
 
-        let tokens = self.lexer.tokenize(input)?;
+        let tokens = self
+            .lexer
+            .tokenize(input)
+            .map_err(|err| ParseError::invalid(err.to_string()))?;
+
         if tokens.is_empty() {
             return Ok(ParsedCommand::Empty);
         }
 
-        let expr = self.parse_sequence(&tokens)?;
+        let mut cursor = TokenCursor::new(tokens);
+        let expr = parse_sequence(&mut cursor)?;
+
+        if !cursor.is_eof() {
+            return Err(ParseError::invalid(format!(
+                "unexpected trailing token: {:?}",
+                cursor.peek()
+            )));
+        }
+
         Ok(ParsedCommand::Expr(expr))
     }
+}
 
-    fn parse_sequence(&self, tokens: &[Token]) -> ShellResult<ShellExpr> {
-        if let Some(parts) = split_top_level(tokens, |t| matches!(t, Token::Semicolon)) {
-            let mut exprs = Vec::new();
-            for part in parts {
-                exprs.push(self.parse_boolean(part)?);
-            }
-            return Ok(ShellExpr::Sequence(exprs));
-        }
+#[derive(Debug, Clone)]
+struct TokenCursor {
+    tokens: Vec<Token>,
+    pos: usize,
+}
 
-        self.parse_boolean(tokens)
+impl TokenCursor {
+    fn new(tokens: Vec<Token>) -> Self {
+        Self { tokens, pos: 0 }
     }
 
-    fn parse_boolean(&self, tokens: &[Token]) -> ShellResult<ShellExpr> {
-        if let Some((left, op, right)) =
-            split_first_top_level(tokens, |t| matches!(t, Token::AndIf | Token::OrIf))
-        {
-            let lhs = self.parse_boolean(left)?;
-            let rhs = self.parse_pipeline(right)?;
-
-            return match op {
-                Token::AndIf => Ok(ShellExpr::And(Box::new(lhs), Box::new(rhs))),
-                Token::OrIf => Ok(ShellExpr::Or(Box::new(lhs), Box::new(rhs))),
-                _ => Err(ShellError::message("invalid boolean operator")),
-            };
-        }
-
-        self.parse_pipeline(tokens)
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
     }
 
-    fn parse_pipeline(&self, tokens: &[Token]) -> ShellResult<ShellExpr> {
-        if let Some(parts) = split_top_level(tokens, |t| matches!(t, Token::Pipe)) {
-            let mut commands = Vec::new();
-            for part in parts {
-                commands.push(self.parse_command_node(part)?);
-            }
-            return Ok(ShellExpr::Pipeline(commands));
+    fn next(&mut self) -> Option<Token> {
+        let token = self.tokens.get(self.pos).cloned();
+        if token.is_some() {
+            self.pos += 1;
         }
-
-        Ok(ShellExpr::Command(self.parse_command_node(tokens)?))
+        token
     }
 
-    fn parse_command_node(&self, tokens: &[Token]) -> ShellResult<CommandNode> {
-        if tokens.is_empty() {
-            return Err(ShellError::message("expected command"));
-        }
-
-        if matches!(tokens.first(), Some(Token::LParen))
-            && matches!(tokens.last(), Some(Token::RParen))
-            && is_wrapped_group(tokens)
-        {
-            let inner = &tokens[1..tokens.len() - 1];
-            let expr = self.parse_sequence(inner)?;
-            return Ok(CommandNode::Group(Box::new(expr)));
-        }
-
-        let simple = self.parse_simple_command(tokens)?;
-        Ok(CommandNode::Simple(simple))
-    }
-
-    fn parse_simple_command(&self, tokens: &[Token]) -> ShellResult<SimpleCommand> {
-        let mut argv = Vec::new();
-        let mut redirections = Vec::new();
-        let mut i = 0;
-
-        while i < tokens.len() {
-            match &tokens[i] {
-                Token::Word(word) => {
-                    argv.push(word.clone());
-                    i += 1;
-                }
-                Token::IoNumber(fd) => {
-                    let op = tokens
-                        .get(i + 1)
-                        .ok_or_else(|| ShellError::message("expected redirection operator"))?;
-                    let target = tokens
-                        .get(i + 2)
-                        .ok_or_else(|| ShellError::message("expected redirection target"))?;
-
-                    let kind = redirection_kind(op)?;
-                    let target_word = expect_word(target)?;
-
-                    redirections.push(Redirection {
-                        fd: Some(u32::from(*fd)),
-                        kind,
-                        target: target_word.to_string(),
-                    });
-
-                    i += 3;
-                }
-                Token::RedirectIn | Token::RedirectOut | Token::RedirectAppend => {
-                    let target = tokens
-                        .get(i + 1)
-                        .ok_or_else(|| ShellError::message("expected redirection target"))?;
-
-                    let kind = redirection_kind(&tokens[i])?;
-                    let target_word = expect_word(target)?;
-
-                    redirections.push(Redirection {
-                        fd: None,
-                        kind,
-                        target: target_word.to_string(),
-                    });
-
-                    i += 2;
-                }
-                other => {
-                    return Err(ShellError::message(format!(
-                        "unexpected token in simple command: {other:?}"
-                    )));
-                }
-            }
-        }
-
-        if argv.is_empty() && redirections.is_empty() {
-            return Err(ShellError::message("expected simple command"));
-        }
-
-        Ok(SimpleCommand::with_redirections(argv, redirections))
+    fn is_eof(&self) -> bool {
+        self.pos >= self.tokens.len()
     }
 }
 
-fn expect_word(token: &Token) -> ShellResult<&str> {
-    match token {
-        Token::Word(word) => Ok(word),
-        _ => Err(ShellError::message("expected word")),
-    }
-}
+fn parse_sequence(cursor: &mut TokenCursor) -> ParseResult<ShellExpr> {
+    let mut exprs = Vec::new();
+    exprs.push(parse_boolean_chain(cursor)?);
 
-fn redirection_kind(token: &Token) -> ShellResult<RedirectionKind> {
-    match token {
-        Token::RedirectIn => Ok(RedirectionKind::Input),
-        Token::RedirectOut => Ok(RedirectionKind::OutputTruncate),
-        Token::RedirectAppend => Ok(RedirectionKind::OutputAppend),
-        _ => Err(ShellError::message("expected redirection operator")),
-    }
-}
+    while matches!(cursor.peek(), Some(Token::Semicolon)) {
+        cursor.next();
 
-fn split_top_level<F>(tokens: &[Token], pred: F) -> Option<Vec<&[Token]>>
-where
-    F: Fn(&Token) -> bool,
-{
-    let mut depth = 0usize;
-    let mut parts = Vec::new();
-    let mut start = 0usize;
-    let mut found = false;
-
-    for (idx, token) in tokens.iter().enumerate() {
-        match token {
-            Token::LParen => depth += 1,
-            Token::RParen => depth = depth.saturating_sub(1),
-            _ => {}
+        if cursor.is_eof() {
+            return Err(ParseError::incomplete(
+                "trailing ';' requires another command",
+            ));
         }
 
-        if depth == 0 && pred(token) {
-            parts.push(&tokens[start..idx]);
-            start = idx + 1;
-            found = true;
-        }
+        exprs.push(parse_boolean_chain(cursor)?);
     }
 
-    if found {
-        parts.push(&tokens[start..]);
-        Some(parts)
+    if exprs.len() == 1 {
+        Ok(exprs.remove(0))
     } else {
-        None
+        Ok(ShellExpr::Sequence(exprs))
     }
 }
 
-fn split_first_top_level<F>(tokens: &[Token], pred: F) -> Option<(&[Token], &Token, &[Token])>
-where
-    F: Fn(&Token) -> bool,
-{
-    let mut depth = 0usize;
+fn parse_boolean_chain(cursor: &mut TokenCursor) -> ParseResult<ShellExpr> {
+    let first = parse_pipeline(cursor)?;
+    let mut rest = Vec::new();
 
-    for (idx, token) in tokens.iter().enumerate() {
-        match token {
-            Token::LParen => depth += 1,
-            Token::RParen => depth = depth.saturating_sub(1),
-            _ => {}
+    loop {
+        let op = match cursor.peek() {
+            Some(Token::AndIf) => BoolOp::And,
+            Some(Token::OrIf) => BoolOp::Or,
+            _ => break,
+        };
+
+        cursor.next();
+
+        if cursor.is_eof() {
+            return Err(ParseError::incomplete(
+                "boolean operator requires another command",
+            ));
         }
 
-        if depth == 0 && pred(token) {
-            return Some((&tokens[..idx], token, &tokens[idx + 1..]));
-        }
+        let rhs = parse_pipeline(cursor)?;
+        rest.push((op, rhs));
     }
 
-    None
+    if rest.is_empty() {
+        Ok(first)
+    } else {
+        Ok(ShellExpr::BooleanChain {
+            first: Box::new(first),
+            rest,
+        })
+    }
 }
 
-fn is_wrapped_group(tokens: &[Token]) -> bool {
-    let mut depth = 0usize;
+fn parse_pipeline(cursor: &mut TokenCursor) -> ParseResult<ShellExpr> {
+    let mut commands = Vec::new();
+    commands.push(parse_command(cursor)?);
 
-    for (idx, token) in tokens.iter().enumerate() {
-        match token {
-            Token::LParen => depth += 1,
-            Token::RParen => {
-                depth -= 1;
-                if depth == 0 && idx != tokens.len() - 1 {
-                    return false;
-                }
+    while matches!(cursor.peek(), Some(Token::Pipe)) {
+        cursor.next();
+
+        if cursor.is_eof() {
+            return Err(ParseError::incomplete(
+                "trailing '|' requires another command",
+            ));
+        }
+
+        commands.push(parse_command(cursor)?);
+    }
+
+    if commands.len() == 1 {
+        Ok(ShellExpr::Command(commands.remove(0)))
+    } else {
+        Ok(ShellExpr::Pipeline(commands))
+    }
+}
+
+fn parse_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
+    match cursor.peek() {
+        Some(Token::LParen) => parse_group(cursor),
+        Some(Token::Word(_))
+        | Some(Token::IoNumber(_))
+        | Some(Token::RedirectIn)
+        | Some(Token::RedirectOut)
+        | Some(Token::RedirectAppend) => parse_simple_command(cursor),
+        Some(Token::RParen) => Err(ParseError::invalid("unexpected ')'")),
+        Some(Token::Pipe | Token::AndIf | Token::OrIf | Token::Semicolon) => {
+            Err(ParseError::invalid("expected command"))
+        }
+        None => Err(ParseError::incomplete("expected command")),
+    }
+}
+
+fn parse_group(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
+    match cursor.next() {
+        Some(Token::LParen) => {}
+        _ => return Err(ParseError::invalid("expected '('")),
+    }
+
+    if cursor.is_eof() {
+        return Err(ParseError::incomplete("unclosed group"));
+    }
+
+    let expr = parse_sequence(cursor)?;
+
+    match cursor.next() {
+        Some(Token::RParen) => Ok(CommandNode::Group(Box::new(expr))),
+        None => Err(ParseError::incomplete("unclosed group")),
+        other => Err(ParseError::invalid(format!(
+            "expected ')' but found {:?}",
+            other
+        ))),
+    }
+}
+
+fn parse_simple_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
+    let mut argv = Vec::new();
+    let mut redirections = Vec::new();
+
+    loop {
+        match cursor.peek() {
+            Some(Token::Word(word)) => {
+                argv.push(word.clone());
+                cursor.next();
             }
-            _ => {}
+            Some(Token::IoNumber(_))
+            | Some(Token::RedirectIn)
+            | Some(Token::RedirectOut)
+            | Some(Token::RedirectAppend) => {
+                redirections.push(parse_redirection(cursor)?);
+            }
+            _ => break,
         }
     }
 
-    true
+    if argv.is_empty() && redirections.is_empty() {
+        return Err(ParseError::invalid("expected simple command"));
+    }
+
+    Ok(CommandNode::Simple(SimpleCommand::with_redirections(
+        argv,
+        redirections,
+    )))
+}
+
+fn parse_redirection(cursor: &mut TokenCursor) -> ParseResult<Redirection> {
+    let mut fd = None;
+
+    if let Some(Token::IoNumber(n)) = cursor.peek() {
+        fd = Some(u32::from(*n));
+        cursor.next();
+    }
+
+    let kind = match cursor.next() {
+        Some(Token::RedirectIn) => RedirectionKind::Input,
+        Some(Token::RedirectOut) => RedirectionKind::OutputTruncate,
+        Some(Token::RedirectAppend) => RedirectionKind::OutputAppend,
+        other => {
+            return Err(ParseError::invalid(format!(
+                "expected redirection operator, found {:?}",
+                other
+            )));
+        }
+    };
+
+    let target = match cursor.next() {
+        Some(Token::Word(word)) => word,
+        None => return Err(ParseError::incomplete("redirection missing target")),
+        other => {
+            return Err(ParseError::invalid(format!(
+                "redirection target must be a word, found {:?}",
+                other
+            )));
+        }
+    };
+
+    Ok(Redirection { fd, kind, target })
 }

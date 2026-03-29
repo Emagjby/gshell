@@ -1,5 +1,5 @@
 use gshell::{
-    ast::{CommandNode, Redirection, RedirectionKind, ShellExpr, SimpleCommand},
+    ast::{BoolOp, CommandNode, Redirection, RedirectionKind, ShellExpr, SimpleCommand},
     lexer::{Lexer, Token},
     parser::{ParsedCommand, Parser},
 };
@@ -118,5 +118,87 @@ fn parses_grouped_command_ast() {
                 "hi".into()
             ])))
         ))))
+    );
+}
+
+#[test]
+fn pipeline_precedence_is_higher_than_boolean_chain() {
+    let parser = Parser::default();
+    let parsed = parser.parse("a | b && c").expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::BooleanChain {
+            first: Box::new(ShellExpr::Pipeline(vec![
+                CommandNode::Simple(SimpleCommand::new(vec!["a".into()])),
+                CommandNode::Simple(SimpleCommand::new(vec!["b".into()])),
+            ])),
+            rest: vec![(
+                BoolOp::And,
+                ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["c".into()])))
+            )],
+        })
+    );
+}
+
+#[test]
+fn boolean_chain_parses_left_to_right() {
+    let parser = Parser::default();
+    let parsed = parser.parse("a && b || c").expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::BooleanChain {
+            first: Box::new(ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(
+                vec!["a".into()]
+            )))),
+            rest: vec![
+                (
+                    BoolOp::And,
+                    ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["b".into()])))
+                ),
+                (
+                    BoolOp::Or,
+                    ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["c".into()])))
+                ),
+            ],
+        })
+    );
+}
+
+#[test]
+fn sequence_parsing_works() {
+    let parser = Parser::default();
+    let parsed = parser.parse("a ; b ; c").expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Sequence(vec![
+            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["a".into()]))),
+            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["b".into()]))),
+            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["c".into()]))),
+        ]))
+    );
+}
+
+#[test]
+fn redirect_attaches_to_simple_command() {
+    let parser = Parser::default();
+    let parsed = parser
+        .parse("echo hi 2>> err.log")
+        .expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(
+            SimpleCommand::with_redirections(
+                vec!["echo".into(), "hi".into()],
+                vec![Redirection {
+                    fd: Some(2),
+                    kind: RedirectionKind::OutputAppend,
+                    target: "err.log".into(),
+                }]
+            )
+        )))
     );
 }

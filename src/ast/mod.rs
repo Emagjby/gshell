@@ -32,9 +32,17 @@ pub enum CommandNode {
 pub enum ShellExpr {
     Command(CommandNode),
     Pipeline(Vec<CommandNode>),
-    And(Box<ShellExpr>, Box<ShellExpr>),
-    Or(Box<ShellExpr>, Box<ShellExpr>),
+    BooleanChain {
+        first: Box<ShellExpr>,
+        rest: Vec<(BoolOp, ShellExpr)>,
+    },
     Sequence(Vec<ShellExpr>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoolOp {
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
