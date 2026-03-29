@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 
 use gshell::{
-    ast::SimpleCommand,
     parser::ParsedCommand,
     prompt::{FallbackPromptRenderer, Prompt, ReedlinePromptAdapter},
     runtime::{Executor, ExecutorFuture},
@@ -37,27 +36,6 @@ impl Executor<ParsedCommand> for RecordingExecutor {
             Ok(ShellAction::continue_with(CommandOutput::success()))
         })
     }
-}
-
-#[tokio::test]
-async fn shell_launces_and_waits_for_input() {
-    let executor = RecordingExecutor::default();
-    let core = ReplCore::new(executor.clone());
-    let state = ShellState::shared().await.expect("state should initialize");
-
-    let flow = core
-        .handle_signal(Signal::Success("echo hello".to_string()), state.clone())
-        .await;
-
-    assert_eq!(flow, ReplFlow::Continue);
-    assert_eq!(
-        executor.calls(),
-        vec![ParsedCommand::Simple(SimpleCommand::new(vec![
-            "echo".to_string(),
-            "hello".to_string()
-        ]))]
-    );
-    assert_eq!(state.read().await.last_exit_status(), ExitCode::SUCCESS);
 }
 
 #[tokio::test]

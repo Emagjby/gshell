@@ -10,6 +10,7 @@ use std::{
 use tokio::process::Command;
 
 use crate::{
+    ast::{CommandNode, ShellExpr},
     builtins::BuiltinRegistry,
     parser::ParsedCommand,
     shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellResult},
@@ -33,23 +34,25 @@ impl Executor<ParsedCommand> for BootstrapExecutor {
         Box::pin(async move {
             match command {
                 ParsedCommand::Empty => Ok(ShellAction::continue_with(CommandOutput::success())),
-                ParsedCommand::Simple(simple) => {
-                    if let Some((name, args)) = simple.argv.split_first() {
-                        let registry = BuiltinRegistry::with_defaults();
+                ParsedCommand::Expr(expr) => match expr {
+                    ShellExpr::Command(CommandNode::Simple(simple)) => {
+                        if let Some((name, args)) = simple.argv.split_first() {
+                            let registry = BuiltinRegistry::with_defaults();
 
-                        if let Some(builtin) = registry.get(name) {
-                            return builtin.execute(state.clone(), args).await;
+                            if let Some(builtin) = registry.get(name) {
+                                return builtin.execute(state.clone(), args).await;
+                            }
+
+                            return execute_external(state.clone(), name, args).await;
                         }
-
-                        return execute_external(state.clone(), name, args).await;
+                        Ok(ShellAction::continue_with(CommandOutput::success()))
                     }
-
-                    Ok(ShellAction::continue_with(CommandOutput {
+                    _ => Ok(ShellAction::continue_with(CommandOutput {
                         exit_code: ExitCode::FAILURE,
                         stdout: String::new(),
-                        stderr: format!("command not found: {}", simple.argv.join(" ")),
-                    }))
-                }
+                        stderr: "compound command execution is not yet implemented\n".to_string(),
+                    })),
+                },
             }
         })
     }
