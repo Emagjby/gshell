@@ -1,0 +1,12 @@
+pub mod ast;
+pub mod builtins;
+pub mod compat;
+pub mod completion;
+pub mod config;
+pub mod expand;
+pub mod jobs;
+pub mod lexer;
+pub mod parser;
+pub mod prompt;
+pub mod runtime;
+pub mod ui;
