@@ -1,15 +1,66 @@
+use std::sync::Arc;
+
+use gshell::builtins::{Builtin, BuiltinFuture, BuiltinRegistry};
+use gshell::shell::{CommandOutput, ExitCode, SharedShellState, ShellState};
+
+struct TestBuiltin;
+
+impl Builtin for TestBuiltin {
+    fn name(&self) -> &'static str {
+        "test"
+    }
+
+    fn execute<'a>(&'a self, _state: SharedShellState, _args: &'a [String]) -> BuiltinFuture<'a> {
+        Box::pin(async { Ok(CommandOutput::success()) })
+    }
+}
+
 #[test]
-fn lib_modules_are_wired() {
-    let _ = gshell::ast::Ast;
-    let _ = gshell::builtins::Builtins;
-    let _ = gshell::compat::Compat;
-    let _ = gshell::completion::Completion;
-    let _ = gshell::config::Config;
-    let _ = gshell::expand::Expand;
-    let _ = gshell::jobs::Jobs;
-    let _ = gshell::lexer::Lexer;
-    let _ = gshell::parser::Parser;
-    let _ = gshell::prompt::Prompt;
-    let _ = gshell::runtime::Runtime;
-    let _ = gshell::ui::Ui;
+fn shell_state_initialization_defaults() {
+    let state = ShellState::new().expect("shell state should initialize");
+
+    assert_eq!(state.last_exit_status(), ExitCode::SUCCESS);
+    assert!(state.cwd().is_absolute());
+    assert!(state.history().entries().is_empty());
+    assert!(state.aliases().get("missing").is_none());
+    assert!(state.functions().get("missing").is_none());
+}
+
+#[test]
+fn shell_state_environment_read_and_write() {
+    let mut state = ShellState::new().expect("shell state should initialize");
+
+    state.set_env_var("GSHELL_TEST_KEY", "value-1");
+    assert_eq!(state.env_var("GSHELL_TEST_KEY"), Some("value-1"));
+
+    state.set_env_var("GSHELL_TEST_KEY", "value-2");
+    assert_eq!(state.env_var("GSHELL_TEST_KEY"), Some("value-2"));
+
+    let removed = state.remove_env_var("GSHELL_TEST_KEY");
+    assert_eq!(removed.as_deref(), Some("value-2"));
+    assert_eq!(state.env_var("GSHELL_TEST_KEY"), None);
+}
+
+#[test]
+fn shell_state_last_exit_status_updates() {
+    let mut state = ShellState::new().expect("shell state should initialize");
+
+    assert_eq!(state.last_exit_status(), ExitCode::SUCCESS);
+
+    state.set_last_exit_status(ExitCode::new(42));
+    assert_eq!(state.last_exit_status(), ExitCode::new(42));
+}
+
+#[test]
+fn builtin_registry_basics() {
+    let mut registry = BuiltinRegistry::new();
+
+    assert!(registry.is_empty());
+
+    registry.register(Arc::new(TestBuiltin));
+
+    assert_eq!(registry.len(), 1);
+    assert!(registry.contains("test"));
+    assert!(registry.get("test").is_some());
+    assert!(registry.get("missing").is_none());
 }

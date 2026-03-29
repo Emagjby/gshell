@@ -9,4 +9,5 @@ pub mod lexer;
 pub mod parser;
 pub mod prompt;
 pub mod runtime;
+pub mod shell;
 pub mod ui;
