@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use gshell::{
+    ast::SimpleCommand,
     parser::ParsedCommand,
     prompt::{FallbackPromptRenderer, Prompt, ReedlinePromptAdapter},
     runtime::{Executor, ExecutorFuture},
@@ -51,7 +52,10 @@ async fn shell_launces_and_waits_for_input() {
     assert_eq!(flow, ReplFlow::Continue);
     assert_eq!(
         executor.calls(),
-        vec![ParsedCommand::Raw("echo hello".to_string())]
+        vec![ParsedCommand::Simple(SimpleCommand::new(vec![
+            "echo".to_string(),
+            "hello".to_string()
+        ]))]
     );
     assert_eq!(state.read().await.last_exit_status(), ExitCode::SUCCESS);
 }
