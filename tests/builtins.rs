@@ -3,6 +3,8 @@ use gshell::{
         Builtin, BuiltinRegistry, CdBuiltin, ClearBuiltin, EchoBuiltin, ExitBuiltin,
         HistoryBuiltin, PwdBuiltin, TypeBuiltin,
     },
+    parser::Parser,
+    runtime::{BootstrapExecutor, Executor},
     shell::{ExitCode, ShellAction, ShellState},
 };
 
@@ -196,5 +198,53 @@ async fn history_builtin_outputs_entries() {
             assert!(output.stdout.contains("history"));
         }
         ShellAction::Exit(_) => panic!("history should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn parsed_argv_reaches_echo_builtin_with_single_quotes() {
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse("echo 'hello world'")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "hello world\n");
+        }
+        ShellAction::Exit(_) => panic!("echo should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn parsed_argv_reaches_echo_builtin_with_double_quotes() {
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse("echo \"hello world\"")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "hello world\n");
+        }
+        ShellAction::Exit(_) => panic!("echo should not exit"),
     }
 }

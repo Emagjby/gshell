@@ -81,7 +81,7 @@ where
 {
     pub fn new(executor: E) -> Self {
         Self {
-            parser: Parser,
+            parser: Parser::default(),
             executor,
         }
     }
