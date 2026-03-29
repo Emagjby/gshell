@@ -18,7 +18,7 @@ impl ExitCode {
     }
 
     pub fn is_failure(&self) -> bool {
-        self.0 == Self::FAILURE.0
+        !self.is_success()
     }
 }
 
