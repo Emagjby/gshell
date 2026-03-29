@@ -123,7 +123,7 @@ impl ShellState {
         self.env.remove(key)
     }
 
-    pub fn cwd(&self) -> &PathBuf {
+    pub fn cwd(&self) -> &Path {
         &self.cwd
     }
 
