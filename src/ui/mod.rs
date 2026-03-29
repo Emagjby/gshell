@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
-use reedline::{Reedline, Signal};
+use reedline::{FileBackedHistory, Reedline, Signal};
 
 use crate::{
+    history::{HistoryConfig, should_record_history_entry},
     parser::{ParsedCommand, Parser},
     prompt::{FallbackPromptRenderer, ReedlinePromptAdapter},
     runtime::Executor,
-    shell::{ExitCode, SharedShellState, ShellResult},
+    shell::{ExitCode, SharedShellState, ShellError, ShellResult},
 };
 
 pub struct Repl<E> {
@@ -29,9 +30,19 @@ impl<E> Repl<E>
 where
     E: Executor<ParsedCommand>,
 {
-    pub fn new(executor: E) -> Self {
+    pub async fn new(executor: E, state: SharedShellState) -> Self {
+        let history = build_history(state.clone()).await;
+
+        let line_editor = match history {
+            Ok(history) => Reedline::create().with_history(Box::new(history)),
+            Err(err) => {
+                eprintln!("warning: failed to initialize history: {err}");
+                Reedline::create()
+            }
+        };
+
         Self {
-            line_editor: Reedline::create(),
+            line_editor,
             core: ReplCore::new(executor),
         }
     }
@@ -47,10 +58,7 @@ where
                 Ok(signal) => signal,
                 Err(err) => {
                     eprintln!("reedline error: {err}");
-                    state
-                        .write()
-                        .expect("shell state lock poisoned")
-                        .set_last_exit_status(ExitCode::FAILURE);
+                    state.write().await.set_last_exit_status(ExitCode::FAILURE);
                     continue;
                 }
             };
@@ -85,16 +93,21 @@ where
                     Ok(cmd) => cmd,
                     Err(err) => {
                         eprintln!("{err}");
-                        state
-                            .write()
-                            .expect("shell state lock poisoned")
-                            .set_last_exit_status(ExitCode::FAILURE);
+                        state.write().await.set_last_exit_status(ExitCode::FAILURE);
                         return ReplFlow::Continue;
                     }
                 };
 
                 if matches!(command, ParsedCommand::Empty) {
                     return ReplFlow::Continue;
+                }
+
+                if should_record_history_entry(&buf) {
+                    state
+                        .write()
+                        .await
+                        .history_mut()
+                        .push(buf.trim().to_string());
                 }
 
                 if matches!(command, ParsedCommand::Exit) {
@@ -111,27 +124,18 @@ where
                             eprint!("{}", output.stderr);
                         }
 
-                        state
-                            .write()
-                            .expect("shell state lock poisoned")
-                            .set_last_exit_status(output.exit_code);
+                        state.write().await.set_last_exit_status(output.exit_code);
                     }
                     Err(err) => {
                         eprintln!("{err}");
-                        state
-                            .write()
-                            .expect("shell state lock poisoned")
-                            .set_last_exit_status(ExitCode::FAILURE);
+                        state.write().await.set_last_exit_status(ExitCode::FAILURE);
                     }
                 }
 
                 ReplFlow::Continue
             }
             Signal::CtrlC => {
-                state
-                    .write()
-                    .expect("shell state lock poisoned")
-                    .set_last_exit_status(ExitCode::FAILURE);
+                state.write().await.set_last_exit_status(ExitCode::FAILURE);
                 println!();
                 ReplFlow::Continue
             }
@@ -141,4 +145,20 @@ where
             }
         }
     }
+}
+
+async fn build_history(state: SharedShellState) -> ShellResult<FileBackedHistory> {
+    let config = HistoryConfig::resolve_default()?;
+    config.ensure_parent_dir()?;
+
+    let history = FileBackedHistory::with_file(1_000, config.path().to_path_buf())
+        .map_err(|err| ShellError::message(format!("history init failed: {err}")))?;
+
+    let entries = std::fs::read_to_string(config.path())
+        .map(|content| content.lines().map(ToOwned::to_owned).collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    state.write().await.history_mut().set_entries(entries);
+
+    Ok(history)
 }

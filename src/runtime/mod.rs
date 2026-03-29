@@ -1,6 +1,7 @@
 use std::pin::Pin;
 
 use crate::{
+    builtins::BuiltinRegistry,
     parser::ParsedCommand,
     shell::{CommandOutput, ExitCode, SharedShellState, ShellResult},
 };
@@ -17,16 +18,31 @@ pub struct BootstrapExecutor;
 impl Executor<ParsedCommand> for BootstrapExecutor {
     fn execute<'a>(
         &'a self,
-        _state: SharedShellState,
+        state: SharedShellState,
         command: &'a ParsedCommand,
     ) -> ExecutorFuture<'a> {
         Box::pin(async move {
             match command {
                 ParsedCommand::Empty | ParsedCommand::Exit => Ok(CommandOutput::success()),
-                ParsedCommand::Raw(input) => Ok(CommandOutput::failure(
-                    ExitCode::FAILURE,
-                    format!("execution not implemented yet: {input}\n"),
-                )),
+                ParsedCommand::Raw(input) => {
+                    let parts = input
+                        .split_whitespace()
+                        .map(ToOwned::to_owned)
+                        .collect::<Vec<_>>();
+
+                    if let Some((name, args)) = parts.split_first() {
+                        let registry = BuiltinRegistry::with_defaults();
+
+                        if let Some(builtin) = registry.get(name) {
+                            return builtin.execute(state.clone(), args).await;
+                        }
+                    }
+
+                    Ok(CommandOutput::failure(
+                        ExitCode::FAILURE,
+                        format!("command not found: {}", input),
+                    ))
+                }
             }
         })
     }

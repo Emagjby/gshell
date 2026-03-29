@@ -87,7 +87,7 @@ mod test {
     #[tokio::test]
     async fn test_fallback_prompt_renderer() {
         let renderer = FallbackPromptRenderer;
-        let state = ShellState::shared().expect("state should initialize");
+        let state = ShellState::shared().await.expect("state should initialize");
 
         let rendered = renderer
             .render_prompt(state)
