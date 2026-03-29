@@ -13,6 +13,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
 expectrl = "0.7.0"
 tempfile = "3.27.0"
 
@@ -28,3 +29,7 @@ unsafe_code = "deny"
 [lints.rustdoc]
 broken_intra_doc_links = "deny"
 bare_urls = "deny"
+
+[[bench]]
+name = "shell_bench"
+harness = false
