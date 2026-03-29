@@ -144,3 +144,17 @@ async fn cd_followed_by_pwd_updates_shell_state() {
 
     assert_eq!(flow, ReplFlow::Continue);
 }
+
+#[tokio::test]
+async fn external_command_runs_through_repl_core() {
+    let executor = gshell::runtime::BootstrapExecutor;
+    let core = ReplCore::new(executor);
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let flow = core
+        .handle_signal(Signal::Success("false".to_string()), state.clone())
+        .await;
+
+    assert_eq!(flow, ReplFlow::Continue);
+    assert!(state.read().await.last_exit_status().is_failure());
+}
