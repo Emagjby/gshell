@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use gshell::{
     parser::ParsedCommand,
+    prompt::{FallbackPromptRenderer, Prompt, ReedlinePromptAdapter},
     runtime::{Executor, ExecutorFuture},
     shell::{CommandOutput, ExitCode, SharedShellState, ShellState},
     ui::{ReplCore, ReplFlow},
@@ -101,4 +102,37 @@ async fn explicit_exit_terminates_session_cleanly() {
             .last_exit_status(),
         ExitCode::SUCCESS
     );
+}
+
+#[tokio::test]
+async fn prompt_shows_dollar_space() {
+    let renderer = std::sync::Arc::new(FallbackPromptRenderer);
+    let state = ShellState::shared().expect("state should initialize");
+    let mut prompt = ReedlinePromptAdapter::new(renderer);
+
+    prompt.refresh(state).await;
+
+    assert_eq!(prompt.render_prompt_left(), "$ ");
+}
+
+#[tokio::test]
+async fn prompt_still_available_after_command_execution() {
+    let renderer = std::sync::Arc::new(FallbackPromptRenderer);
+    let state = ShellState::shared().expect("state should initialize");
+    let mut prompt = ReedlinePromptAdapter::new(renderer);
+
+    prompt.refresh(state.clone()).await;
+
+    let executor = RecordingExecutor::default();
+    let core = ReplCore::new(executor);
+
+    let flow = core
+        .handle_signal(Signal::Success("echo hello".to_string()), state.clone())
+        .await;
+
+    assert_eq!(flow, ReplFlow::Continue);
+
+    prompt.refresh(state).await;
+
+    assert_eq!(prompt.render_prompt_left(), "$ ");
 }

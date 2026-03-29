@@ -1,6 +1,6 @@
-use std::{borrow::Cow, future::Future, pin::Pin};
+use std::{borrow::Cow, future::Future, pin::Pin, sync::Arc};
 
-use reedline::{DefaultPrompt as ReedlineDefaultPrompt, PromptViMode};
+use reedline::PromptViMode;
 pub use reedline::{DefaultPromptSegment, Prompt, PromptEditMode, PromptHistorySearch};
 
 use crate::shell::{SharedShellState, ShellResult};
@@ -11,68 +11,50 @@ pub trait PromptRenderer: Send + Sync {
     fn render_prompt<'a>(&'a self, state: SharedShellState) -> PromptFuture<'a>;
 }
 
-#[derive(Clone)]
-pub struct DefaultPrompt {
-    inner: ReedlineDefaultPrompt,
-}
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FallbackPromptRenderer;
 
-impl Default for DefaultPrompt {
-    fn default() -> Self {
-        Self {
-            inner: ReedlineDefaultPrompt::new(
-                DefaultPromptSegment::Basic("$ ".to_string()),
-                DefaultPromptSegment::Empty,
-            ),
-        }
-    }
-}
-
-impl DefaultPrompt {
-    pub const fn new(
-        left_prompt: DefaultPromptSegment,
-        right_prompt: DefaultPromptSegment,
-    ) -> Self {
-        Self {
-            inner: ReedlineDefaultPrompt::new(left_prompt, right_prompt),
-        }
-    }
-
-    pub fn with_reedline_prompt(prompt: ReedlineDefaultPrompt) -> Self {
-        Self { inner: prompt }
-    }
-}
-
-impl PromptRenderer for DefaultPrompt {
+impl PromptRenderer for FallbackPromptRenderer {
     fn render_prompt<'a>(&'a self, _state: SharedShellState) -> PromptFuture<'a> {
-        Box::pin(async {
-            let left = self.inner.render_prompt_left();
-            let indicator = self.render_prompt_indicator(PromptEditMode::Default);
-
-            let mut prompt = String::with_capacity(left.len() + indicator.len() + 1);
-            prompt.push_str(left.as_ref());
-
-            if !left.is_empty() {
-                prompt.push(' ');
-            }
-
-            prompt.push_str(indicator.as_ref());
-
-            if !prompt.ends_with(' ') {
-                prompt.push(' ');
-            }
-
-            Ok(prompt)
-        })
+        Box::pin(async { Ok("$ ".to_string()) })
     }
 }
 
-impl Prompt for DefaultPrompt {
+pub struct ReedlinePromptAdapter<R> {
+    renderer: Arc<R>,
+    prompt: String,
+}
+
+impl<R> ReedlinePromptAdapter<R>
+where
+    R: PromptRenderer,
+{
+    pub fn new(renderer: Arc<R>) -> Self {
+        Self {
+            renderer,
+            prompt: "$ ".to_string(),
+        }
+    }
+
+    pub async fn refresh(&mut self, state: SharedShellState) {
+        self.prompt = self
+            .renderer
+            .render_prompt(state)
+            .await
+            .unwrap_or_else(|_| "$ ".to_string());
+    }
+}
+
+impl<R> Prompt for ReedlinePromptAdapter<R>
+where
+    R: PromptRenderer,
+{
     fn render_prompt_left(&self) -> Cow<'_, str> {
-        self.inner.render_prompt_left()
+        Cow::Borrowed(self.prompt.as_str())
     }
 
     fn render_prompt_right(&self) -> Cow<'_, str> {
-        self.inner.render_prompt_right()
+        Cow::Borrowed("")
     }
 
     fn render_prompt_indicator(&self, edit_mode: PromptEditMode) -> Cow<'_, str> {
@@ -83,14 +65,35 @@ impl Prompt for DefaultPrompt {
     }
 
     fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        self.inner.render_prompt_multiline_indicator()
+        Cow::Borrowed("> ")
     }
 
     fn render_prompt_history_search_indicator(
         &self,
         history_search: PromptHistorySearch,
     ) -> Cow<'_, str> {
-        self.inner
-            .render_prompt_history_search_indicator(history_search)
+        Cow::Owned(format!(
+            "(history search: {}) ",
+            history_search.term.as_str()
+        ))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::shell::ShellState;
+
+    #[tokio::test]
+    async fn test_fallback_prompt_renderer() {
+        let renderer = FallbackPromptRenderer;
+        let state = ShellState::shared().expect("state should initialize");
+
+        let rendered = renderer
+            .render_prompt(state)
+            .await
+            .expect("rendering should succeed");
+
+        assert_eq!(rendered, "$ ");
     }
 }

@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use reedline::{Reedline, Signal};
 
 use crate::{
     parser::{ParsedCommand, Parser},
-    prompt::DefaultPrompt,
+    prompt::{FallbackPromptRenderer, ReedlinePromptAdapter},
     runtime::Executor,
     shell::{ExitCode, SharedShellState, ShellResult},
 };
@@ -35,9 +37,12 @@ where
     }
 
     pub async fn run(&mut self, state: SharedShellState) -> ShellResult<()> {
-        let prompt = DefaultPrompt::default();
+        let renderer = Arc::new(FallbackPromptRenderer);
+        let mut prompt = ReedlinePromptAdapter::new(renderer.clone());
 
         loop {
+            prompt.refresh(state.clone()).await;
+
             let signal = match self.line_editor.read_line(&prompt) {
                 Ok(signal) => signal,
                 Err(err) => {
