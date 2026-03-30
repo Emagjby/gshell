@@ -1080,6 +1080,8 @@ async fn expand_simple_command(
     state: SharedShellState,
     simple: &SimpleCommand,
 ) -> ShellResult<(Vec<String>, Vec<ExpandedRedirection>)> {
+    // Expansion order is: alias rewrite of the command word, assignment-prefix env updates,
+    // variable/command substitution, then pathname globbing on argv only.
     let simple = resolve_aliases(state.clone(), simple).await?;
     let substitution_executor: CommandSubstitutionExecutor = Arc::new(move |state, expr| {
         let executor = BootstrapExecutor;
@@ -1208,9 +1210,12 @@ fn parse_alias_simple_command(alias_value: &str) -> ShellResult<Option<SimpleCom
 }
 
 async fn expand_heredoc_body(state: SharedShellState, body: &str) -> ShellResult<String> {
-    let guard = state.read().await;
     let mut out = String::new();
     let mut chars = body.chars().peekable();
+    let substitution_executor: CommandSubstitutionExecutor = Arc::new(move |state, expr| {
+        let executor = BootstrapExecutor;
+        Box::pin(async move { executor.execute_command_substitution(state, expr).await })
+    });
 
     while let Some(ch) = chars.next() {
         match ch {
@@ -1223,7 +1228,8 @@ async fn expand_heredoc_body(state: SharedShellState, body: &str) -> ShellResult
             '$' => match chars.peek().copied() {
                 Some('?') => {
                     chars.next();
-                    out.push_str(&guard.last_exit_status().as_u8().to_string());
+                    let status = state.read().await.last_exit_status().as_u8().to_string();
+                    out.push_str(&status);
                 }
                 Some(next) if is_var_start(next) => {
                     let mut name = String::new();
@@ -1236,9 +1242,21 @@ async fn expand_heredoc_body(state: SharedShellState, body: &str) -> ShellResult
                         }
                     }
 
-                    if let Some(value) = guard.env_var(&name) {
-                        out.push_str(value);
+                    let value = {
+                        let guard = state.read().await;
+                        guard.env_var(&name).map(ToOwned::to_owned)
+                    };
+
+                    if let Some(value) = value {
+                        out.push_str(&value);
                     }
+                }
+                Some('(') => {
+                    chars.next();
+                    let source = collect_command_substitution_source(&mut chars)?;
+                    let expr = parse_command_substitution_source(&source)?;
+                    let substituted = substitution_executor(state.clone(), *expr).await?;
+                    out.push_str(&normalize_command_substitution_output(substituted));
                 }
                 _ => out.push('$'),
             },
@@ -1255,4 +1273,122 @@ fn is_var_start(ch: char) -> bool {
 
 fn is_var_continue(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
+}
+
+fn collect_command_substitution_source<I>(chars: &mut std::iter::Peekable<I>) -> ShellResult<String>
+where
+    I: Iterator<Item = char>,
+{
+    let mut out = String::new();
+    let mut depth = 1usize;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' => {
+                out.push(ch);
+                collect_raw_single_quoted(chars, &mut out)?;
+            }
+            '"' => {
+                out.push(ch);
+                collect_raw_double_quoted(chars, &mut out)?;
+            }
+            '\\' => {
+                out.push(ch);
+                match chars.next() {
+                    Some(next) => out.push(next),
+                    None => {
+                        return Err(ShellError::message("unterminated command substitution"));
+                    }
+                }
+            }
+            '$' if chars.peek() == Some(&'(') => {
+                out.push('$');
+                out.push('(');
+                chars.next();
+                depth += 1;
+            }
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(out);
+                }
+                out.push(')');
+            }
+            other => out.push(other),
+        }
+    }
+
+    Err(ShellError::message("unterminated command substitution"))
+}
+
+fn collect_raw_single_quoted<I>(
+    chars: &mut std::iter::Peekable<I>,
+    out: &mut String,
+) -> ShellResult<()>
+where
+    I: Iterator<Item = char>,
+{
+    loop {
+        match chars.next() {
+            Some('\'') => {
+                out.push('\'');
+                return Ok(());
+            }
+            Some(c) => out.push(c),
+            None => return Err(ShellError::message("unterminated single-quoted string")),
+        }
+    }
+}
+
+fn collect_raw_double_quoted<I>(
+    chars: &mut std::iter::Peekable<I>,
+    out: &mut String,
+) -> ShellResult<()>
+where
+    I: Iterator<Item = char>,
+{
+    loop {
+        match chars.next() {
+            Some('"') => {
+                out.push('"');
+                return Ok(());
+            }
+            Some('\\') => {
+                out.push('\\');
+                match chars.next() {
+                    Some(next) => out.push(next),
+                    None => {
+                        return Err(ShellError::message(
+                            "unterminated escape in double-quoted string",
+                        ));
+                    }
+                }
+            }
+            Some(c) => out.push(c),
+            None => return Err(ShellError::message("unterminated double-quoted string")),
+        }
+    }
+}
+
+fn parse_command_substitution_source(source: &str) -> ShellResult<Box<ShellExpr>> {
+    match Parser::default()
+        .parse(source)
+        .map_err(|err| ShellError::message(err.to_string()))?
+    {
+        ParsedCommand::Expr(expr) => Ok(Box::new(expr)),
+        ParsedCommand::Empty => Ok(Box::new(ShellExpr::Command(CommandNode::Simple(
+            SimpleCommand::new(Vec::new()),
+        )))),
+    }
+}
+
+fn normalize_command_substitution_output(mut output: String) -> String {
+    while output.ends_with('\n') {
+        output.pop();
+        if output.ends_with('\r') {
+            output.pop();
+        }
+    }
+
+    output
 }

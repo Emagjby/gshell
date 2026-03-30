@@ -326,3 +326,28 @@ async fn last_heredoc_wins_when_multiple_are_present() {
     let content = fs::read_to_string(output).expect("captured output should be readable");
     assert_eq!(content, "second body\n");
 }
+
+#[tokio::test]
+async fn unquoted_heredoc_runs_command_substitution() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let output = dir.path().join("captured.txt");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse(&format!(
+            "cat <<EOF > {}\n$(printf 'hello')\nEOF\n",
+            output.display()
+        ))
+        .expect("parse should succeed");
+
+    let _ = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    let content = fs::read_to_string(output).expect("captured output should be readable");
+    assert_eq!(content, "hello\n");
+}

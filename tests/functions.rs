@@ -121,3 +121,26 @@ async fn alias_takes_precedence_over_function_lookup() {
         ShellAction::Exit(_) => panic!("function execution should not exit"),
     }
 }
+
+#[tokio::test]
+async fn alias_can_expand_to_function_name() {
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse("greet() { echo function; }; alias say=greet; say")
+        .expect("parse should succeed");
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "function\n");
+        }
+        ShellAction::Exit(_) => panic!("function execution should not exit"),
+    }
+}
