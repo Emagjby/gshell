@@ -78,6 +78,12 @@ impl ShellCompleter {
             }
         }
 
+        for function in self.read_state(|state| state.functions().names()) {
+            if function.starts_with(prefix) {
+                out.insert(function);
+            }
+        }
+
         let path_var = self.current_path_var();
 
         for dir in env::split_paths(&OsString::from(path_var)) {

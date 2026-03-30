@@ -7,6 +7,7 @@ use std::{
 use tokio::sync::RwLock;
 
 use crate::{
+    ast::ShellExpr,
     config::{HighlighterConfig, PromptConfig},
     history::HistoryConfig,
     shell::ExitCode,
@@ -76,16 +77,26 @@ impl AliasStore {
 
 #[derive(Debug, Clone, Default)]
 pub struct FunctionStore {
-    functions: HashMap<String, String>,
+    functions: HashMap<String, ShellExpr>,
 }
 
 impl FunctionStore {
-    pub fn get(&self, name: &str) -> Option<&str> {
-        self.functions.get(name).map(String::as_str)
+    pub fn get(&self, name: &str) -> Option<&ShellExpr> {
+        self.functions.get(name)
     }
 
-    pub fn set(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.functions.insert(name.into(), value.into());
+    pub fn set(&mut self, name: impl Into<String>, value: ShellExpr) {
+        self.functions.insert(name.into(), value);
+    }
+
+    pub fn remove(&mut self, name: &str) -> Option<ShellExpr> {
+        self.functions.remove(name)
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        let mut names = self.functions.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
     }
 }
 
@@ -130,6 +141,7 @@ pub struct ShellState {
     history: HistoryState,
     aliases: AliasStore,
     functions: FunctionStore,
+    active_functions: Vec<String>,
     runtime_services: RuntimeServices,
 }
 
@@ -147,6 +159,7 @@ impl ShellState {
             history: HistoryState::new(history_path),
             aliases: AliasStore::default(),
             functions: FunctionStore::default(),
+            active_functions: Vec::new(),
             runtime_services: RuntimeServices::default(),
         })
     }
@@ -209,6 +222,19 @@ impl ShellState {
 
     pub fn functions_mut(&mut self) -> &mut FunctionStore {
         &mut self.functions
+    }
+
+    pub fn can_enter_function(&self, name: &str) -> bool {
+        !self.active_functions.iter().any(|active| active == name)
+            && self.active_functions.len() < 64
+    }
+
+    pub fn enter_function(&mut self, name: impl Into<String>) {
+        self.active_functions.push(name.into());
+    }
+
+    pub fn exit_function(&mut self) {
+        self.active_functions.pop();
     }
 
     pub fn runtime_services(&self) -> &RuntimeServices {

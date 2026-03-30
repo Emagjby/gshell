@@ -16,7 +16,9 @@ pub enum Token {
     RedirectHeredoc,
     RedirectOut,
     RedirectAppend,
+    LBrace,
     LParen,
+    RBrace,
     RParen,
     IoNumber(u8),
 }
@@ -58,9 +60,17 @@ impl Lexer {
                     chars.next();
                     tokens.push(Token::Semicolon);
                 }
+                '{' => {
+                    chars.next();
+                    tokens.push(Token::LBrace);
+                }
                 '(' => {
                     chars.next();
                     tokens.push(Token::LParen);
+                }
+                '}' => {
+                    chars.next();
+                    tokens.push(Token::RBrace);
                 }
                 ')' => {
                     chars.next();
@@ -130,7 +140,7 @@ impl Lexer {
         while let Some(ch) = chars.peek().copied() {
             match ch {
                 c if c.is_whitespace() => break,
-                '|' | '&' | ';' | '>' | '<' | '(' | ')' => break,
+                '|' | '&' | ';' | '>' | '<' | '(' | ')' | '{' | '}' => break,
                 '\'' => {
                     flush_literal(&mut literal, &mut segments, QuoteKind::Unquoted);
                     chars.next();

@@ -44,6 +44,10 @@ impl SimpleCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandNode {
     Simple(SimpleCommand),
+    FunctionDef {
+        name: String,
+        body: Box<ShellExpr>,
+    },
     /// Placeholder for parenthesized command syntax until real subshell state isolation lands.
     Subshell(Box<ShellExpr>),
 }

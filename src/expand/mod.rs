@@ -360,6 +360,9 @@ fn render_command_node(node: &CommandNode) -> String {
 
             parts.join(" ")
         }
+        CommandNode::FunctionDef { name, body } => {
+            format!("{name}() {{ {} }}", render_shell_expr(body))
+        }
         CommandNode::Subshell(expr) => format!("({})", render_shell_expr(expr)),
     }
 }

@@ -31,6 +31,14 @@ impl Builtin for TypeBuiltin {
                 }));
             }
 
+            if state.read().await.functions().get(needle).is_some() {
+                return Ok(ShellAction::continue_with(CommandOutput {
+                    exit_code: ExitCode::SUCCESS,
+                    stdout: format!("{needle} is a shell function\n"),
+                    stderr: String::new(),
+                }));
+            }
+
             if registry.contains(needle) {
                 return Ok(ShellAction::continue_with(CommandOutput {
                     exit_code: ExitCode::SUCCESS,

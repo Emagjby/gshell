@@ -105,6 +105,28 @@ fn lexer_preserves_quote_context() {
 }
 
 #[test]
+fn function_definition_tokenization_works() {
+    let lexer = Lexer;
+    let tokens = lexer
+        .tokenize("greet() { echo hi; }")
+        .expect("tokenization should succeed");
+
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Word(lit("greet")),
+            Token::LParen,
+            Token::RParen,
+            Token::LBrace,
+            Token::Word(lit("echo")),
+            Token::Word(lit("hi")),
+            Token::Semicolon,
+            Token::RBrace,
+        ]
+    );
+}
+
+#[test]
 fn parses_pipeline_ast() {
     let parser = Parser::default();
     let parsed = parser.parse("echo hi | cat").expect("parse should succeed");
@@ -203,6 +225,35 @@ fn parses_grouped_command_ast() {
             ])))
         ))))
     );
+}
+
+#[test]
+fn parses_function_definition_ast() {
+    let parser = Parser::default();
+    let parsed = parser
+        .parse("greet() { echo hi; }")
+        .expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::FunctionDef {
+            name: "greet".into(),
+            body: Box::new(ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(
+                vec![lit("echo"), lit("hi"),]
+            )))),
+        }))
+    );
+}
+
+#[test]
+fn malformed_function_definition_is_rejected() {
+    let parser = Parser::default();
+    let err = parser
+        .parse("greet() { echo hi")
+        .expect_err("parse should fail");
+
+    assert_eq!(err.kind, ParseErrorKind::Incomplete);
+    assert!(err.message.contains("unclosed function body"));
 }
 
 #[test]
