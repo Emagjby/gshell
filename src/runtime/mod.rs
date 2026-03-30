@@ -10,6 +10,9 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use tokio::{io::AsyncWriteExt, process::Command, sync::RwLock};
 
 use crate::{
@@ -126,10 +129,19 @@ impl BootstrapExecutor {
     ) -> ShellResult<ShellAction> {
         match node {
             CommandNode::Simple(simple) => self.execute_simple_command(state, simple, mode).await,
-            CommandNode::Group(expr) | CommandNode::Subshell(expr) => {
-                self.execute_expr(state, expr, mode).await
+            CommandNode::Subshell(expr) => {
+                self.execute_subshell_placeholder(state, expr, mode).await
             }
         }
+    }
+
+    async fn execute_subshell_placeholder(
+        &self,
+        state: SharedShellState,
+        expr: &ShellExpr,
+        mode: ExecutionMode,
+    ) -> ShellResult<ShellAction> {
+        self.execute_expr(state, expr, mode).await
     }
 
     async fn execute_simple_command(
@@ -145,7 +157,7 @@ impl BootstrapExecutor {
             return Ok(ShellAction::continue_with(CommandOutput::success()));
         };
 
-        let registry = BuiltinRegistry::with_defaults();
+        let registry = BuiltinRegistry::defaults();
 
         if let Some(builtin) = registry.get(name) {
             return self
@@ -299,7 +311,7 @@ impl BootstrapExecutor {
                     });
                 };
 
-                let registry = BuiltinRegistry::with_defaults();
+                let registry = BuiltinRegistry::defaults();
 
                 if let Some(builtin) = registry.get(name) {
                     let isolated_state = clone_shell_state_for_pipeline(&state).await;
@@ -350,9 +362,9 @@ impl BootstrapExecutor {
                 )
                 .await
             }
-            CommandNode::Group(expr) | CommandNode::Subshell(expr) => {
+            CommandNode::Subshell(expr) => {
                 let action = self
-                    .execute_expr(state, expr, ExecutionMode::Pipeline)
+                    .execute_subshell_placeholder(state, expr, ExecutionMode::Pipeline)
                     .await?;
 
                 Ok(match action {
@@ -699,7 +711,23 @@ fn resolve_command_path(program: &str, env_map: &HashMap<String, String>) -> Opt
 }
 
 fn is_executable_file(path: &Path) -> bool {
-    path.is_file()
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+
+    if !metadata.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        metadata.permissions().mode() & 0o111 != 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 fn build_redirection_plan(redirections: &[ExpandedRedirection]) -> ShellResult<RedirectionPlan> {

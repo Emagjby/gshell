@@ -14,7 +14,12 @@ pub use history::HistoryBuiltin;
 pub use pwd::PwdBuiltin;
 pub use r#type::TypeBuiltin;
 
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    sync::{Arc, OnceLock},
+};
 
 use crate::shell::{SharedShellState, ShellAction, ShellResult};
 
@@ -33,6 +38,11 @@ pub struct BuiltinRegistry {
 impl BuiltinRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn defaults() -> &'static Self {
+        static DEFAULTS: OnceLock<BuiltinRegistry> = OnceLock::new();
+        DEFAULTS.get_or_init(Self::with_defaults)
     }
 
     pub fn with_defaults() -> Self {

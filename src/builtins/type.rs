@@ -21,7 +21,7 @@ impl Builtin for TypeBuiltin {
             }
 
             let needle = &args[0];
-            let registry = BuiltinRegistry::with_defaults();
+            let registry = BuiltinRegistry::defaults();
 
             if registry.contains(needle) {
                 return Ok(ShellAction::continue_with(CommandOutput {

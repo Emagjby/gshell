@@ -58,10 +58,15 @@ impl Parser {
             return Err(ParseError::invalid("input contains a null byte"));
         }
 
-        let tokens = self
-            .lexer
-            .tokenize(input)
-            .map_err(|err| ParseError::invalid(err.to_string()))?;
+        let tokens = self.lexer.tokenize(input).map_err(|err| {
+            let msg = err.to_string();
+
+            if matches_incomplete_lex_error(&msg) {
+                ParseError::incomplete(msg)
+            } else {
+                ParseError::invalid(msg)
+            }
+        })?;
 
         if tokens.is_empty() {
             return Ok(ParsedCommand::Empty);
@@ -79,6 +84,16 @@ impl Parser {
 
         Ok(ParsedCommand::Expr(expr))
     }
+}
+
+fn matches_incomplete_lex_error(msg: &str) -> bool {
+    matches!(
+        msg,
+        "unterminated single-quoted string"
+            | "unterminated double-quoted string"
+            | "unterminated escape in double-quoted string"
+            | "unterminated escape sequence"
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -190,7 +205,7 @@ fn parse_pipeline(cursor: &mut TokenCursor) -> ParseResult<ShellExpr> {
 
 fn parse_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
     match cursor.peek() {
-        Some(Token::LParen) => parse_group(cursor),
+        Some(Token::LParen) => parse_subshell(cursor),
         Some(Token::Word(_))
         | Some(Token::IoNumber(_))
         | Some(Token::RedirectIn)
@@ -204,21 +219,21 @@ fn parse_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
     }
 }
 
-fn parse_group(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
+fn parse_subshell(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
     match cursor.next() {
         Some(Token::LParen) => {}
         _ => return Err(ParseError::invalid("expected '('")),
     }
 
     if cursor.is_eof() {
-        return Err(ParseError::incomplete("unclosed group"));
+        return Err(ParseError::incomplete("unclosed subshell"));
     }
 
     let expr = parse_sequence(cursor)?;
 
     match cursor.next() {
-        Some(Token::RParen) => Ok(CommandNode::Group(Box::new(expr))),
-        None => Err(ParseError::incomplete("unclosed group")),
+        Some(Token::RParen) => Ok(CommandNode::Subshell(Box::new(expr))),
+        None => Err(ParseError::incomplete("unclosed subshell")),
         other => Err(ParseError::invalid(format!(
             "expected ')' but found {:?}",
             other

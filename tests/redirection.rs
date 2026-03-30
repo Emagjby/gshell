@@ -142,3 +142,77 @@ async fn redirected_builtin_does_not_write_to_terminal_output_buffer() {
     let content = fs::read_to_string(out).expect("output file should be readable");
     assert!(!content.trim().is_empty());
 }
+
+#[tokio::test]
+async fn output_redirection_target_expands_environment_variables() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let out = dir.path().join("expanded-out.txt");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+    state
+        .write()
+        .await
+        .set_env_var("OUTFILE", out.display().to_string());
+
+    let parsed = parser
+        .parse("echo hello > \"$OUTFILE\"")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert!(output.stdout.is_empty());
+        }
+        ShellAction::Exit(_) => panic!("echo should not exit"),
+    }
+
+    let content = fs::read_to_string(out).expect("output file should be readable");
+    assert_eq!(content, "hello\n");
+}
+
+#[tokio::test]
+async fn input_redirection_target_expands_environment_variables() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let input = dir.path().join("expanded-in.txt");
+    let output = dir.path().join("captured-out.txt");
+    fs::write(&input, "hello from file\n").expect("input file should be writable");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+    state
+        .write()
+        .await
+        .set_env_var("INFILE", input.display().to_string());
+    state
+        .write()
+        .await
+        .set_env_var("OUTFILE", output.display().to_string());
+
+    let parsed = parser
+        .parse("cat < \"$INFILE\" > \"$OUTFILE\"")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert!(output.stdout.is_empty());
+        }
+        ShellAction::Exit(_) => panic!("cat should not exit"),
+    }
+
+    let content = fs::read_to_string(output).expect("captured output should be readable");
+    assert_eq!(content, "hello from file\n");
+}

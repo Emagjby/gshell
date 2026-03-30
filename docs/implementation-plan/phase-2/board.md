@@ -34,11 +34,11 @@ Extend the syntax model so the shell can represent command composition instead o
 
 1. Add token support for `|`, `&&`, `||`, `;`, `>`, `>>`, `<`, fd redirects, and grouping parentheses.
 2. Extend AST nodes for:
-   - pipelines
-   - boolean chains
-   - sequential lists
-   - redirections
-   - grouped commands or subshell placeholders
+    - pipelines
+    - boolean chains
+    - sequential lists
+    - redirections
+    - grouped commands or subshell placeholders
 3. Keep node design neutral so runtime semantics stay in the executor.
 4. Preserve room for heredocs and command substitution in later phases.
 
@@ -78,11 +78,11 @@ Parse shell syntax into structured command trees with correct precedence and ass
 
 1. Implement parser functions or combinators using `winnow`.
 2. Parse the language in precedence layers:
-   - lists
-   - boolean chains
-   - pipelines
-   - commands
-   - redirections
+    - lists
+    - boolean chains
+    - pipelines
+    - commands
+    - redirections
 3. Attach redirects to the correct command node.
 4. Distinguish invalid input from incomplete input.
 5. Keep parser code explicit and debuggable.
