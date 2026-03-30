@@ -114,7 +114,9 @@ async fn cd_followed_by_pwd_updates_shell_state() {
         .await;
 
     assert_eq!(flow, ReplFlow::Continue);
-    assert_eq!(state.read().await.cwd(), tmp.path());
+    let expected =
+        std::fs::canonicalize(tmp.path()).expect("temp dir path should canonicalize successfully");
+    assert_eq!(state.read().await.cwd(), expected);
 
     let flow = core
         .handle_signal(Signal::Success("pwd".to_string()), state.clone())

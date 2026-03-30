@@ -1,18 +1,20 @@
+use crate::expand::Word;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleCommand {
-    pub argv: Vec<String>,
+    pub argv: Vec<Word>,
     pub redirections: Vec<Redirection>,
 }
 
 impl SimpleCommand {
-    pub fn new(argv: Vec<String>) -> Self {
+    pub fn new(argv: Vec<Word>) -> Self {
         Self {
             argv,
             redirections: Vec::new(),
         }
     }
 
-    pub fn with_redirections(argv: Vec<String>, redirections: Vec<Redirection>) -> Self {
+    pub fn with_redirections(argv: Vec<Word>, redirections: Vec<Redirection>) -> Self {
         Self { argv, redirections }
     }
 
@@ -49,7 +51,7 @@ pub enum BoolOp {
 pub struct Redirection {
     pub fd: Option<u32>,
     pub kind: RedirectionKind,
-    pub target: String,
+    pub target: Word,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

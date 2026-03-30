@@ -97,7 +97,9 @@ async fn cd_builtin_changes_shell_state_directory() {
         ShellAction::Continue(output) => {
             assert_eq!(output.exit_code, ExitCode::SUCCESS);
             let cwd = state.read().await.cwd().to_path_buf();
-            assert_eq!(cwd, tmp.path());
+            let expected = std::fs::canonicalize(tmp.path())
+                .expect("temp dir path should canonicalize successfully");
+            assert_eq!(cwd, expected);
         }
         ShellAction::Exit(_) => panic!("cd should not exit"),
     }
