@@ -1,3 +1,4 @@
+mod alias;
 mod cd;
 mod clear;
 mod echo;
@@ -5,7 +6,9 @@ mod exit;
 mod history;
 mod pwd;
 mod r#type;
+mod unalias;
 
+pub use alias::AliasBuiltin;
 pub use cd::CdBuiltin;
 pub use clear::ClearBuiltin;
 pub use echo::EchoBuiltin;
@@ -13,6 +16,7 @@ pub use exit::ExitBuiltin;
 pub use history::HistoryBuiltin;
 pub use pwd::PwdBuiltin;
 pub use r#type::TypeBuiltin;
+pub use unalias::UnaliasBuiltin;
 
 use std::{
     collections::HashMap,
@@ -47,12 +51,14 @@ impl BuiltinRegistry {
 
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
+        registry.register(Arc::new(AliasBuiltin));
         registry.register(Arc::new(HistoryBuiltin));
         registry.register(Arc::new(CdBuiltin));
         registry.register(Arc::new(PwdBuiltin));
         registry.register(Arc::new(EchoBuiltin));
         registry.register(Arc::new(ClearBuiltin));
         registry.register(Arc::new(TypeBuiltin));
+        registry.register(Arc::new(UnaliasBuiltin));
         registry.register(Arc::new(ExitBuiltin));
         registry
     }

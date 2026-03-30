@@ -88,6 +88,18 @@ impl Word {
             .iter()
             .any(|segment| !matches!(segment.quote_kind(), QuoteKind::Unquoted))
     }
+
+    pub fn as_unquoted_literal(&self) -> Option<&str> {
+        match self.segments.as_slice() {
+            [
+                WordSegment::Literal {
+                    text,
+                    quote: QuoteKind::Unquoted,
+                },
+            ] => Some(text),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

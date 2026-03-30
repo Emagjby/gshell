@@ -10,7 +10,7 @@ impl Builtin for TypeBuiltin {
         "type"
     }
 
-    fn execute<'a>(&'a self, _state: SharedShellState, args: &'a [String]) -> BuiltinFuture<'a> {
+    fn execute<'a>(&'a self, state: SharedShellState, args: &'a [String]) -> BuiltinFuture<'a> {
         Box::pin(async move {
             if args.len() != 1 {
                 return Ok(ShellAction::continue_with(CommandOutput {
@@ -22,6 +22,14 @@ impl Builtin for TypeBuiltin {
 
             let needle = &args[0];
             let registry = BuiltinRegistry::defaults();
+
+            if let Some(value) = state.read().await.aliases().get(needle).map(str::to_owned) {
+                return Ok(ShellAction::continue_with(CommandOutput {
+                    exit_code: ExitCode::SUCCESS,
+                    stdout: format!("{needle} is aliased to `{value}`\n"),
+                    stderr: String::new(),
+                }));
+            }
 
             if registry.contains(needle) {
                 return Ok(ShellAction::continue_with(CommandOutput {
