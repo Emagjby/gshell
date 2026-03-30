@@ -3,9 +3,10 @@ mod imp {
     use std::{fs::File, io, sync::OnceLock};
 
     use nix::{
+        sys::signal::killpg,
         sys::signal::{SigSet, SigmaskHow, Signal, pthread_sigmask},
         sys::wait::{WaitPidFlag, WaitStatus, waitpid},
-        unistd::{Pid, getpgrp, tcgetpgrp, tcsetpgrp},
+        unistd::{Pid, getpgrp, getpid, setpgid, tcgetpgrp, tcsetpgrp},
     };
     use tokio::task;
 
@@ -24,9 +25,18 @@ mod imp {
         Stopped(i32),
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum PolledWaitStatus {
+        Exited { pid: u32, code: i32 },
+        Signaled { pid: u32, signal: i32 },
+        Stopped { pid: u32, signal: i32 },
+        Continued { pid: u32 },
+    }
+
     static JOB_CONTROL: OnceLock<Option<JobControl>> = OnceLock::new();
 
     pub(crate) async fn initialize_interactive_shell() -> ShellResult<()> {
+        let _ = JOB_CONTROL.get_or_init(setup_job_control);
         Ok(())
     }
 
@@ -63,6 +73,14 @@ mod imp {
             .map_err(nix_err)
     }
 
+    pub(crate) fn continue_process_group(pgid: u32) -> ShellResult<()> {
+        let Some(pgid) = pid_from_u32(pgid) else {
+            return Ok(());
+        };
+
+        killpg(pgid, Signal::SIGCONT).map_err(nix_err)
+    }
+
     pub(crate) async fn wait_for_foreground_process(pid: u32) -> ShellResult<ForegroundWaitStatus> {
         let Some(pid) = pid_from_u32(pid) else {
             return Ok(ForegroundWaitStatus::Exited(1));
@@ -91,15 +109,68 @@ mod imp {
         .map_err(nix_err)
     }
 
+    pub(crate) async fn poll_child_statuses() -> ShellResult<Vec<PolledWaitStatus>> {
+        task::spawn_blocking(move || {
+            let mut statuses = Vec::new();
+
+            loop {
+                match waitpid(
+                    Pid::from_raw(-1),
+                    Some(WaitPidFlag::WNOHANG | WaitPidFlag::WUNTRACED | WaitPidFlag::WCONTINUED),
+                ) {
+                    Ok(WaitStatus::StillAlive) => return Ok(statuses),
+                    Ok(WaitStatus::Exited(pid, code)) => {
+                        if let Ok(pid) = u32::try_from(pid.as_raw()) {
+                            statuses.push(PolledWaitStatus::Exited { pid, code });
+                        }
+                    }
+                    Ok(WaitStatus::Signaled(pid, signal, _)) => {
+                        if let Ok(pid) = u32::try_from(pid.as_raw()) {
+                            statuses.push(PolledWaitStatus::Signaled {
+                                pid,
+                                signal: signal as i32,
+                            });
+                        }
+                    }
+                    Ok(WaitStatus::Stopped(pid, signal)) => {
+                        if let Ok(pid) = u32::try_from(pid.as_raw()) {
+                            statuses.push(PolledWaitStatus::Stopped {
+                                pid,
+                                signal: signal as i32,
+                            });
+                        }
+                    }
+                    Ok(WaitStatus::Continued(pid)) => {
+                        if let Ok(pid) = u32::try_from(pid.as_raw()) {
+                            statuses.push(PolledWaitStatus::Continued { pid });
+                        }
+                    }
+                    Ok(_) => continue,
+                    Err(nix::errno::Errno::ECHILD) => return Ok(statuses),
+                    Err(err) => return Err(err),
+                }
+            }
+        })
+        .await
+        .map_err(|err| ShellError::message(format!("failed to join wait task: {err}")))?
+        .map_err(nix_err)
+    }
+
     fn setup_job_control() -> Option<JobControl> {
         let tty = File::options()
             .read(true)
             .write(true)
             .open("/dev/tty")
             .ok()?;
+        let pid = getpid();
+        if getpgrp() != pid {
+            let _ = setpgid(pid, pid);
+        }
         let shell_pgid = getpgrp();
 
-        let _ = tcgetpgrp(&tty).ok()?;
+        if tcgetpgrp(&tty).ok()? != shell_pgid {
+            with_blocked_job_control_signals(|| tcsetpgrp(&tty, shell_pgid)).ok()?;
+        }
 
         Some(JobControl { tty, shell_pgid })
     }
@@ -166,10 +237,18 @@ mod imp {
         Ok(())
     }
 
+    pub(crate) fn continue_process_group(_pgid: u32) -> ShellResult<()> {
+        Ok(())
+    }
+
     pub(crate) async fn wait_for_foreground_process(
         _pid: u32,
     ) -> ShellResult<ForegroundWaitStatus> {
         Ok(ForegroundWaitStatus::Exited(1))
+    }
+
+    pub(crate) async fn poll_child_statuses() -> ShellResult<Vec<PolledWaitStatus>> {
+        Ok(Vec::new())
     }
 }
 

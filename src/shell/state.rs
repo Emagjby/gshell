@@ -4,7 +4,10 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::RwLock;
+use tokio::{
+    process::Child,
+    sync::{Mutex, RwLock},
+};
 
 use crate::{
     ast::ShellExpr,
@@ -15,6 +18,32 @@ use crate::{
 };
 
 pub type SharedShellState = Arc<RwLock<ShellState>>;
+
+#[derive(Debug, Clone, Default)]
+pub struct ChildHandleStore {
+    children: Arc<Mutex<HashMap<u32, Arc<Mutex<Child>>>>>,
+}
+
+impl ChildHandleStore {
+    pub async fn insert(&self, pid: u32, child: Child) {
+        self.children
+            .lock()
+            .await
+            .insert(pid, Arc::new(Mutex::new(child)));
+    }
+
+    pub async fn get(&self, pid: u32) -> Option<Arc<Mutex<Child>>> {
+        self.children.lock().await.get(&pid).cloned()
+    }
+
+    pub async fn remove(&self, pid: u32) -> Option<Arc<Mutex<Child>>> {
+        self.children.lock().await.remove(&pid)
+    }
+
+    pub async fn pids(&self) -> Vec<u32> {
+        self.children.lock().await.keys().copied().collect()
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct HistoryState {
@@ -143,6 +172,7 @@ pub struct ShellState {
     aliases: AliasStore,
     functions: FunctionStore,
     jobs: Jobs,
+    child_handles: ChildHandleStore,
     active_functions: Vec<String>,
     runtime_services: RuntimeServices,
 }
@@ -162,6 +192,7 @@ impl ShellState {
             aliases: AliasStore::default(),
             functions: FunctionStore::default(),
             jobs: Jobs::default(),
+            child_handles: ChildHandleStore::default(),
             active_functions: Vec::new(),
             runtime_services: RuntimeServices::default(),
         })
@@ -233,6 +264,10 @@ impl ShellState {
 
     pub fn jobs_mut(&mut self) -> &mut Jobs {
         &mut self.jobs
+    }
+
+    pub fn child_handles(&self) -> &ChildHandleStore {
+        &self.child_handles
     }
 
     pub fn can_enter_function(&self, name: &str) -> bool {

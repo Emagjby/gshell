@@ -13,6 +13,8 @@ use std::{
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
@@ -30,7 +32,7 @@ use crate::{
         CommandSubstitutionExecutor, Word, expand_words_pathnames_with_state,
         expand_words_with_state,
     },
-    jobs::{JobDisposition, JobId, ProcessRecord, ProcessState},
+    jobs::{JobDisposition, JobId, JobState, ProcessRecord, ProcessState},
     parser::{ParsedCommand, Parser},
     shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
 };
@@ -111,6 +113,177 @@ pub trait Executor<C>: Send + Sync {
 
 pub async fn initialize_interactive_shell() -> ShellResult<()> {
     unix::initialize_interactive_shell().await
+}
+
+pub async fn refresh_job_statuses(state: SharedShellState) -> ShellResult<()> {
+    let child_handles = { state.read().await.child_handles().clone() };
+    let child_pids = child_handles.pids().await;
+
+    for pid in child_pids {
+        let child_handle = child_handles.get(pid).await;
+
+        let Some(child_handle) = child_handle else {
+            continue;
+        };
+
+        let mut child = child_handle.lock().await;
+        let Some(exit_status) = child.try_wait()? else {
+            continue;
+        };
+        drop(child);
+        let _ = child_handles.remove(pid).await;
+
+        let process_state = process_state_from_exit_status(exit_status);
+        let mut guard = state.write().await;
+        let jobs = guard.jobs_mut();
+        if let Some(job_id) = jobs.job_id_for_pid(pid) {
+            let _ = jobs.update_process_state(job_id, pid, process_state);
+        }
+    }
+
+    let statuses = unix::poll_child_statuses().await?;
+
+    if statuses.is_empty() {
+        return Ok(());
+    }
+
+    let mut guard = state.write().await;
+    let jobs = guard.jobs_mut();
+
+    for status in statuses {
+        match status {
+            unix::PolledWaitStatus::Exited { pid, code } => {
+                if let Some(job_id) = jobs.job_id_for_pid(pid) {
+                    let _ = jobs.update_process_state(job_id, pid, ProcessState::Completed(code));
+                }
+            }
+            unix::PolledWaitStatus::Signaled { pid, signal } => {
+                if let Some(job_id) = jobs.job_id_for_pid(pid) {
+                    let code = signal_exit_code(signal);
+                    let _ = jobs.update_process_state(
+                        job_id,
+                        pid,
+                        ProcessState::Completed(i32::from(code.as_u8())),
+                    );
+                }
+            }
+            unix::PolledWaitStatus::Stopped { pid, .. } => {
+                if let Some(job_id) = jobs.job_id_for_pid(pid) {
+                    let _ = jobs.update_process_state(job_id, pid, ProcessState::Stopped);
+                }
+            }
+            unix::PolledWaitStatus::Continued { pid } => {
+                if let Some(job_id) = jobs.job_id_for_pid(pid) {
+                    let _ = jobs.update_process_state(job_id, pid, ProcessState::Running);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn continue_job_in_background(
+    state: SharedShellState,
+    job_id: JobId,
+) -> ShellResult<Option<CommandOutput>> {
+    let pgid = {
+        let guard = state.read().await;
+        let Some(job) = guard.jobs().get(job_id) else {
+            return Ok(None);
+        };
+
+        if matches!(job.state(), JobState::Completed) {
+            return Ok(Some(CommandOutput::failure(
+                ExitCode::FAILURE,
+                format!("job has already completed: %{job_id}\n"),
+            )));
+        }
+
+        job.pgid()
+    };
+
+    unix::continue_process_group(pgid)?;
+
+    let mut guard = state.write().await;
+    let jobs = guard.jobs_mut();
+    let _ = jobs.set_disposition(job_id, JobDisposition::Background);
+    let _ = jobs.set_all_processes_running(job_id);
+
+    Ok(Some(CommandOutput::success()))
+}
+
+pub async fn continue_job_in_foreground(
+    state: SharedShellState,
+    job_id: JobId,
+) -> ShellResult<Option<CommandOutput>> {
+    let (pgid, pids, summary) = {
+        let guard = state.read().await;
+        let Some(job) = guard.jobs().get(job_id) else {
+            return Ok(None);
+        };
+
+        if matches!(job.state(), JobState::Completed) {
+            return Ok(Some(CommandOutput::failure(
+                ExitCode::FAILURE,
+                format!("job has already completed: %{job_id}\n"),
+            )));
+        }
+
+        (
+            job.pgid(),
+            job.processes()
+                .iter()
+                .filter(|process| !matches!(process.state(), ProcessState::Completed(_)))
+                .map(ProcessRecord::pid)
+                .collect::<Vec<_>>(),
+            job.summary().to_string(),
+        )
+    };
+
+    {
+        let mut guard = state.write().await;
+        let jobs = guard.jobs_mut();
+        let _ = jobs.set_disposition(job_id, JobDisposition::Foreground);
+        let _ = jobs.set_all_processes_running(job_id);
+    }
+
+    unix::continue_process_group(pgid)?;
+    let foreground_claimed = unix::hand_terminal_to_foreground_job(pgid)?;
+    let mut last_exit_code = ExitCode::SUCCESS;
+
+    for pid in pids {
+        let wait_status = unix::wait_for_foreground_process(pid).await?;
+        let (process_state, exit_code) = process_state_from_wait_status(wait_status);
+        last_exit_code = exit_code;
+
+        let child_handles = { state.read().await.child_handles().clone() };
+        let mut guard = state.write().await;
+        let _ = guard
+            .jobs_mut()
+            .update_process_state(job_id, pid, process_state);
+
+        if matches!(wait_status, unix::ForegroundWaitStatus::Stopped(_)) {
+            let _ = guard.jobs_mut().set_all_processes_stopped(job_id);
+            break;
+        }
+
+        drop(guard);
+
+        if matches!(process_state, ProcessState::Completed(_)) {
+            let _ = child_handles.remove(pid).await;
+        }
+    }
+
+    if foreground_claimed {
+        let _ = unix::reclaim_terminal_for_shell();
+    }
+
+    Ok(Some(CommandOutput {
+        exit_code: last_exit_code,
+        stdout: format!("{summary}\n"),
+        stderr: String::new(),
+    }))
 }
 
 #[derive(Debug, Default)]
@@ -801,6 +974,11 @@ impl BootstrapExecutor {
 
         let (process_state, exit_code) = process_state_from_wait_status(wait_status);
 
+        if matches!(process_state, ProcessState::Stopped) {
+            let child_handles = { state.read().await.child_handles().clone() };
+            child_handles.insert(child_pid, child).await;
+        }
+
         if job_context.foreground_claimed {
             let _ = unix::reclaim_terminal_for_shell();
             job_context.foreground_claimed = false;
@@ -1030,13 +1208,21 @@ async fn execute_external(
 
     let (process_state, exit_code) = process_state_from_wait_status(wait_status);
 
+    if matches!(process_state, ProcessState::Stopped) {
+        let child_handles = { state.read().await.child_handles().clone() };
+        child_handles.insert(child_pid, child).await;
+    }
+
     if let Some(job_id) = job_id {
-        let _ =
-            state
-                .write()
-                .await
-                .jobs_mut()
-                .update_process_state(job_id, child_pid, process_state);
+        let mut guard = state.write().await;
+        let _ = guard
+            .jobs_mut()
+            .update_process_state(job_id, child_pid, process_state);
+    }
+
+    if matches!(process_state, ProcessState::Completed(_)) {
+        let child_handles = { state.read().await.child_handles().clone() };
+        let _ = child_handles.remove(child_pid).await;
     }
 
     Ok(ShellAction::continue_with(CommandOutput {
@@ -1217,6 +1403,19 @@ fn process_state_from_wait_status(status: unix::ForegroundWaitStatus) -> (Proces
             (ProcessState::Stopped, signal_exit_code(signal))
         }
     }
+}
+
+fn process_state_from_exit_status(status: std::process::ExitStatus) -> ProcessState {
+    if let Some(code) = status.code() {
+        return ProcessState::Completed(code.clamp(0, i32::from(u8::MAX)));
+    }
+
+    #[cfg(unix)]
+    let signal = status.signal().unwrap_or(1);
+    #[cfg(not(unix))]
+    let signal = 1;
+    let code = signal_exit_code(signal);
+    ProcessState::Completed(i32::from(code.as_u8()))
 }
 
 fn signal_exit_code(signal: i32) -> ExitCode {

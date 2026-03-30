@@ -226,11 +226,14 @@ where
     }
 
     pub async fn run(&mut self, state: SharedShellState) -> ShellResult<()> {
+        crate::runtime::initialize_interactive_shell().await?;
+
         let renderer = Arc::new(ConfiguredPromptRenderer::new());
         let mut prompt =
             ReedlinePromptAdapter::with_menu_prompt(renderer, self.menu_prompt.clone());
 
         loop {
+            crate::runtime::refresh_job_statuses(state.clone()).await?;
             prompt.refresh(state.clone()).await;
 
             let signal = match self.line_editor.read_line(&prompt) {

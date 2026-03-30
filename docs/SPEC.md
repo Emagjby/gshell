@@ -237,6 +237,8 @@ It should also add key shell builtins needed for bash-like operation:
 
 Builtins should be trait-based and registry-driven so that adding new builtins is straightforward.
 
+For v1.0 job selection syntax should stay small: `fg` and `bg` accept either a bare numeric job id like `1` or a `%`-prefixed id like `%1`. With no argument they select the most recent non-completed job.
+
 ## Behavioral Principles
 
 - Prefer copying known shell semantics over inventing new ones.

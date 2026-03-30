@@ -160,6 +160,7 @@ Reduce semantic gaps between `gshell` and the intended bash-compatible behavior 
 3. Fix true bugs.
 4. Document intentional differences.
 5. Add regressions for every fixed compatibility issue.
+6. Add & to start in bg
 
 ### Tests to implement for the current subphase
 

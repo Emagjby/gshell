@@ -177,8 +177,33 @@ impl Jobs {
         self.jobs.get(&job_id)
     }
 
+    pub fn job_id_for_pid(&self, pid: u32) -> Option<JobId> {
+        self.jobs.iter().find_map(|(job_id, job)| {
+            job.processes()
+                .iter()
+                .any(|process| process.pid() == pid)
+                .then_some(*job_id)
+        })
+    }
+
+    pub fn current_job(&self) -> Option<JobId> {
+        self.jobs
+            .iter()
+            .rev()
+            .find(|(_, job)| !matches!(job.state, JobState::Completed))
+            .map(|(job_id, _)| *job_id)
+    }
+
     pub fn foreground_job(&self) -> Option<JobId> {
         self.foreground_job
+    }
+
+    pub fn set_all_processes_running(&mut self, job_id: JobId) -> bool {
+        self.update_non_completed_processes(job_id, ProcessState::Running)
+    }
+
+    pub fn set_all_processes_stopped(&mut self, job_id: JobId) -> bool {
+        self.update_non_completed_processes(job_id, ProcessState::Stopped)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &JobRecord> {
@@ -196,6 +221,26 @@ impl Jobs {
     fn alloc_job_id(&mut self) -> JobId {
         self.next_job_id = self.next_job_id.saturating_add(1).max(1);
         self.next_job_id
+    }
+
+    fn update_non_completed_processes(&mut self, job_id: JobId, state: ProcessState) -> bool {
+        let Some(job) = self.jobs.get_mut(&job_id) else {
+            return false;
+        };
+
+        for process in &mut job.processes {
+            if !matches!(process.state, ProcessState::Completed(_)) {
+                process.state = state;
+            }
+        }
+
+        job.state = derive_job_state(&job.processes);
+
+        if !matches!(job.state, JobState::Running) && self.foreground_job == Some(job_id) {
+            self.foreground_job = None;
+        }
+
+        true
     }
 }
 
