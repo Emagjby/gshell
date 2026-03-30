@@ -241,3 +241,34 @@ async fn variable_expansion_happens_before_globbing() {
         ShellAction::Exit(_) => panic!("printf should not exit"),
     }
 }
+
+#[tokio::test]
+async fn command_substitution_happens_before_globbing() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    fs::write(dir.path().join("cmd-a.txt"), "").expect("file should be writable");
+    fs::write(dir.path().join("cmd-b.txt"), "").expect("file should be writable");
+
+    let state = ShellState::shared()
+        .await
+        .expect("failed to create shell state");
+    state.write().await.set_cwd(dir.path().to_path_buf());
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let parsed = parser
+        .parse("echo $(printf 'cmd-*.txt')")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "cmd-a.txt cmd-b.txt\n");
+        }
+        ShellAction::Exit(_) => panic!("echo should not exit"),
+    }
+}

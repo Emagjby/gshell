@@ -201,6 +201,17 @@ This approach is chosen because shell syntax is too context-sensitive to model c
 - Process execution still relies on normal Unix process APIs underneath.
 - v1.0 targets macOS and Linux first, but internal boundaries should avoid making future portability impossible.
 
+## Expansion Order
+
+- Parse command structure first, including heredoc descriptors and function definitions.
+- Collect heredoc bodies after the command structure is known.
+- Expand aliases only for the first unquoted word of a simple command before argv expansion.
+- Resolve command lookup in this order: alias, function, builtin, external command.
+- Apply assignment-prefix environment updates before expanding later argv and redirection words in that command.
+- Expand variables and command substitutions before pathname globbing.
+- Run pathname globbing on unquoted argv words only. Unmatched patterns remain literal.
+- For unquoted heredocs, expand variables, `$?`, and command substitutions when building stdin content. Quoted heredoc delimiters disable those expansions.
+
 ## Builtin Strategy
 
 The Rust rewrite should preserve and port the current builtins:
