@@ -2,7 +2,7 @@ use gshell::{
     ast::{BoolOp, CommandNode, Redirection, RedirectionKind, ShellExpr, SimpleCommand},
     expand::{QuoteKind, Word, WordSegment},
     lexer::{Lexer, Token},
-    parser::{ParsedCommand, Parser},
+    parser::{ParseErrorKind, ParsedCommand, Parser},
 };
 
 fn lit(text: &str) -> Word {
@@ -250,5 +250,101 @@ fn redirect_attaches_to_simple_command() {
                 }]
             )
         )))
+    );
+}
+
+#[test]
+fn lexer_tokenizes_nested_command_substitution() {
+    let lexer = Lexer;
+    let tokens = lexer
+        .tokenize("echo $(printf $(pwd))")
+        .expect("tokenization should succeed");
+
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Word(Word::literal("echo")),
+            Token::Word(Word::new(vec![WordSegment::CommandSubstitution {
+                source: "printf $(pwd)".into(),
+                quote: QuoteKind::Unquoted,
+            }])),
+        ]
+    );
+}
+
+#[test]
+fn lexer_tokenizes_double_quoted_command_substitution() {
+    let lexer = Lexer;
+    let tokens = lexer
+        .tokenize(r#"echo "$(pwd)""#)
+        .expect("tokenization should succeed");
+
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Word(Word::literal("echo")),
+            Token::Word(Word::new(vec![WordSegment::CommandSubstitution {
+                source: "pwd".into(),
+                quote: QuoteKind::DoubleQuoted,
+            }])),
+        ]
+    );
+}
+
+#[test]
+fn parser_reports_unclosed_command_substitution_as_incomplete() {
+    let parser = Parser::default();
+    let err = parser
+        .parse("echo $(printf $(pwd)")
+        .expect_err("parse should fail");
+
+    assert_eq!(err.kind, ParseErrorKind::Incomplete);
+    assert!(err.message.contains("unterminated command substitution"));
+}
+
+#[test]
+fn parser_distinguishes_subshell_from_command_substitution() {
+    let parser = Parser::default();
+    let parsed = parser.parse("(echo hi)").expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Subshell(Box::new(
+            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![
+                lit("echo"),
+                lit("hi"),
+            ])))
+        ))))
+    );
+}
+
+#[test]
+fn parser_keeps_command_substitution_inside_word_segments() {
+    let parser = Parser::default();
+    let parsed = parser
+        .parse("echo prefix$(pwd)suffix")
+        .expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(
+            vec![
+                Word::literal("echo"),
+                Word::new(vec![
+                    WordSegment::Literal {
+                        text: "prefix".into(),
+                        quote: QuoteKind::Unquoted,
+                    },
+                    WordSegment::CommandSubstitution {
+                        source: "pwd".into(),
+                        quote: QuoteKind::Unquoted,
+                    },
+                    WordSegment::Literal {
+                        text: "suffix".into(),
+                        quote: QuoteKind::Unquoted,
+                    },
+                ]),
+            ]
+        ))))
     );
 }

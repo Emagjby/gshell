@@ -40,6 +40,13 @@ impl Word {
                         out.push_str(&u8::from(state.last_exit_status()).to_string());
                     }
                 }
+                WordSegment::CommandSubstitution { source, quote } => {
+                    if matches!(quote, QuoteKind::SingleQuoted) {
+                        out.push_str(&format!("$({source})"));
+                    } else {
+                        // To be added in P3-02
+                    }
+                }
             }
         }
 
@@ -52,6 +59,7 @@ pub enum WordSegment {
     Literal { text: String, quote: QuoteKind },
     Variable { name: String, quote: QuoteKind },
     LastStatus { quote: QuoteKind },
+    CommandSubstitution { source: String, quote: QuoteKind },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

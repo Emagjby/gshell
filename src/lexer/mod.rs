@@ -145,7 +145,7 @@ impl Lexer {
                 '$' => {
                     flush_literal(&mut literal, &mut segments, QuoteKind::Unquoted);
                     chars.next();
-                    self.read_variable(chars, &mut segments, QuoteKind::Unquoted)?;
+                    self.read_dollar_expression(chars, &mut segments, QuoteKind::Unquoted)?
                 }
                 other => {
                     chars.next();
@@ -210,7 +210,11 @@ impl Lexer {
                     match chars.next() {
                         Some('"') => literal.push('"'),
                         Some('\\') => literal.push('\\'),
-                        Some('$') => literal.push('$'),
+                        Some('$') => {
+                            flush_literal(&mut literal, segments, QuoteKind::DoubleQuoted);
+                            chars.next();
+                            self.read_dollar_expression(chars, segments, QuoteKind::DoubleQuoted)?;
+                        }
                         Some(other) => {
                             literal.push('\\');
                             literal.push(other);
@@ -225,7 +229,7 @@ impl Lexer {
                 Some('$') => {
                     flush_literal(&mut literal, segments, QuoteKind::DoubleQuoted);
                     chars.next();
-                    self.read_variable(chars, segments, QuoteKind::DoubleQuoted)?;
+                    self.read_dollar_expression(chars, segments, QuoteKind::DoubleQuoted)?;
                 }
                 Some(c) => {
                     chars.next();
@@ -278,6 +282,129 @@ impl Lexer {
                     quote,
                 });
                 Ok(())
+            }
+        }
+    }
+
+    fn read_dollar_expression<I>(
+        &self,
+        chars: &mut std::iter::Peekable<I>,
+        segments: &mut Vec<WordSegment>,
+        quote: QuoteKind,
+    ) -> ShellResult<()>
+    where
+        I: Iterator<Item = char>,
+    {
+        match chars.peek().copied() {
+            Some('(') => {
+                chars.next();
+                let source = self.read_command_substitution(chars)?;
+                segments.push(WordSegment::CommandSubstitution { source, quote });
+                Ok(())
+            }
+            _ => self.read_variable(chars, segments, quote),
+        }
+    }
+
+    fn read_command_substitution<I>(
+        &self,
+        chars: &mut std::iter::Peekable<I>,
+    ) -> ShellResult<String>
+    where
+        I: Iterator<Item = char>,
+    {
+        let mut out = String::new();
+        let mut depth = 1usize;
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\'' => {
+                    out.push(ch);
+                    self.read_raw_single_quoted(chars, &mut out)?;
+                }
+                '"' => {
+                    out.push(ch);
+                    self.read_raw_double_quoted(chars, &mut out)?;
+                }
+                '\\' => {
+                    out.push(ch);
+                    match chars.next() {
+                        Some(next) => out.push(next),
+                        None => {
+                            return Err(ShellError::message("unterminated command substitution"));
+                        }
+                    }
+                }
+                '$' if chars.peek() == Some(&'(') => {
+                    out.push('$');
+                    out.push('(');
+                    chars.next();
+                    depth += 1;
+                }
+                '(' => {
+                    out.push(ch);
+                }
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(out);
+                    }
+                    out.push(ch);
+                }
+                other => out.push(other),
+            }
+        }
+
+        Err(ShellError::message("unterminated command substitution"))
+    }
+
+    fn read_raw_single_quoted<I>(
+        &self,
+        chars: &mut std::iter::Peekable<I>,
+        out: &mut String,
+    ) -> ShellResult<()>
+    where
+        I: Iterator<Item = char>,
+    {
+        loop {
+            match chars.next() {
+                Some('\'') => {
+                    out.push('\'');
+                    return Ok(());
+                }
+                Some(c) => out.push(c),
+                None => return Err(ShellError::message("unterminated single-quoted string")),
+            }
+        }
+    }
+
+    fn read_raw_double_quoted<I>(
+        &self,
+        chars: &mut std::iter::Peekable<I>,
+        out: &mut String,
+    ) -> ShellResult<()>
+    where
+        I: Iterator<Item = char>,
+    {
+        loop {
+            match chars.next() {
+                Some('"') => {
+                    out.push('"');
+                    return Ok(());
+                }
+                Some('\\') => {
+                    out.push('\\');
+                    match chars.next() {
+                        Some(next) => out.push(next),
+                        None => {
+                            return Err(ShellError::message(
+                                "unterminated escape in double-quoted string",
+                            ));
+                        }
+                    }
+                }
+                Some(c) => out.push(c),
+                None => return Err(ShellError::message("unterminated double-quoted string")),
             }
         }
     }

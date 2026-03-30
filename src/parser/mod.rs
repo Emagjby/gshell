@@ -93,6 +93,7 @@ fn matches_incomplete_lex_error(msg: &str) -> bool {
             | "unterminated double-quoted string"
             | "unterminated escape in double-quoted string"
             | "unterminated escape sequence"
+            | "unterminated command substitution"
     )
 }
 
