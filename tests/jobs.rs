@@ -5,6 +5,12 @@ use gshell::{
     shell::{ExitCode, ShellAction, ShellState},
 };
 
+#[cfg(unix)]
+use nix::{
+    sys::signal::{Signal, kill},
+    unistd::Pid,
+};
+
 #[tokio::test]
 async fn external_command_creates_completed_foreground_job_record() {
     let parser = Parser::default();
@@ -61,4 +67,57 @@ async fn pipeline_records_one_job_with_multiple_processes() {
     assert_eq!(job.state(), JobState::Completed);
     assert_eq!(job.processes().len(), 2);
     assert_eq!(job.summary(), "printf hi | cat");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn foreground_stop_marks_job_stopped() {
+    use std::time::Duration;
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+    let parsed = parser.parse("sleep 10").expect("parse should succeed");
+
+    let state_for_task = state.clone();
+    let task = tokio::spawn(async move {
+        executor
+            .execute(state_for_task, &parsed)
+            .await
+            .expect("execution should succeed")
+    });
+
+    let pid = loop {
+        if let Some(pid) = {
+            let guard = state.read().await;
+            guard.jobs().foreground_job().and_then(|job_id| {
+                guard
+                    .jobs()
+                    .get(job_id)
+                    .and_then(|job| job.processes().first().map(|process| process.pid()))
+            })
+        } {
+            break pid;
+        }
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+
+    kill(Pid::from_raw(pid as i32), Signal::SIGSTOP).expect("SIGSTOP should be delivered");
+
+    let result = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("execution should return after stop")
+        .expect("task should join successfully");
+
+    match result {
+        ShellAction::Continue(output) => assert!(output.exit_code.is_failure()),
+        ShellAction::Exit(_) => panic!("sleep should not exit the shell"),
+    }
+
+    let guard = state.read().await;
+    let jobs = guard.jobs().iter().collect::<Vec<_>>();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].state(), JobState::Stopped);
+    assert_eq!(guard.jobs().foreground_job(), None);
 }
