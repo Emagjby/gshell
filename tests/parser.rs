@@ -1,8 +1,13 @@
 use gshell::{
     ast::{BoolOp, CommandNode, Redirection, RedirectionKind, ShellExpr, SimpleCommand},
+    expand::{QuoteKind, Word, WordSegment},
     lexer::{Lexer, Token},
     parser::{ParsedCommand, Parser},
 };
+
+fn lit(text: &str) -> Word {
+    Word::literal(text)
+}
 
 #[test]
 fn operator_tokenization_works() {
@@ -14,16 +19,16 @@ fn operator_tokenization_works() {
     assert_eq!(
         tokens,
         vec![
-            Token::Word("a".into()),
+            Token::Word(lit("a")),
             Token::Pipe,
-            Token::Word("b".into()),
+            Token::Word(lit("b")),
             Token::AndIf,
-            Token::Word("c".into()),
+            Token::Word(lit("c")),
             Token::OrIf,
-            Token::Word("d".into()),
+            Token::Word(lit("d")),
             Token::Semicolon,
             Token::LParen,
-            Token::Word("e".into()),
+            Token::Word(lit("e")),
             Token::RParen,
         ]
     );
@@ -39,15 +44,60 @@ fn redirect_tokenization_works() {
     assert_eq!(
         tokens,
         vec![
-            Token::Word("echo".into()),
-            Token::Word("hi".into()),
+            Token::Word(lit("echo")),
+            Token::Word(lit("hi")),
             Token::RedirectOut,
-            Token::Word("out".into()),
+            Token::Word(lit("out")),
             Token::IoNumber(2),
             Token::RedirectAppend,
-            Token::Word("err".into()),
+            Token::Word(lit("err")),
             Token::RedirectIn,
-            Token::Word("in".into()),
+            Token::Word(lit("in")),
+        ]
+    );
+}
+
+#[test]
+fn lexer_preserves_variable_segments() {
+    let lexer = Lexer;
+    let tokens = lexer
+        .tokenize("echo $HOME $?")
+        .expect("tokenization should succeed");
+
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Word(Word::literal("echo")),
+            Token::Word(Word::new(vec![WordSegment::Variable {
+                name: "HOME".into(),
+                quote: QuoteKind::Unquoted,
+            }])),
+            Token::Word(Word::new(vec![WordSegment::LastStatus {
+                quote: QuoteKind::Unquoted,
+            }])),
+        ]
+    );
+}
+
+#[test]
+fn lexer_preserves_quote_context() {
+    let lexer = Lexer;
+    let tokens = lexer
+        .tokenize(r#"echo '$HOME' "$HOME""#)
+        .expect("tokenization should succeed");
+
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Word(Word::literal("echo")),
+            Token::Word(Word::new(vec![WordSegment::Literal {
+                text: "$HOME".into(),
+                quote: QuoteKind::SingleQuoted,
+            }])),
+            Token::Word(Word::new(vec![WordSegment::Variable {
+                name: "HOME".into(),
+                quote: QuoteKind::DoubleQuoted,
+            }])),
         ]
     );
 }
@@ -60,8 +110,8 @@ fn parses_pipeline_ast() {
     assert_eq!(
         parsed,
         ParsedCommand::Expr(ShellExpr::Pipeline(vec![
-            CommandNode::Simple(SimpleCommand::new(vec!["echo".into(), "hi".into()])),
-            CommandNode::Simple(SimpleCommand::new(vec!["cat".into()])),
+            CommandNode::Simple(SimpleCommand::new(vec![lit("echo"), lit("hi")])),
+            CommandNode::Simple(SimpleCommand::new(vec![lit("cat")])),
         ]))
     );
 }
@@ -75,10 +125,10 @@ fn parses_sequence_ast() {
         parsed,
         ParsedCommand::Expr(ShellExpr::Sequence(vec![
             ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![
-                "echo".into(),
-                "hi".into()
+                lit("echo"),
+                lit("hi")
             ]))),
-            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["pwd".into()]))),
+            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![lit("pwd")]))),
         ]))
     );
 }
@@ -94,11 +144,11 @@ fn parses_redirection_ast() {
         parsed,
         ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(
             SimpleCommand::with_redirections(
-                vec!["echo".into(), "hi".into()],
+                vec![lit("echo"), lit("hi")],
                 vec![Redirection {
                     fd: None,
                     kind: RedirectionKind::OutputTruncate,
-                    target: "out.txt".into(),
+                    target: lit("out.txt"),
                 }],
             )
         )))
@@ -114,8 +164,8 @@ fn parses_grouped_command_ast() {
         parsed,
         ParsedCommand::Expr(ShellExpr::Command(CommandNode::Group(Box::new(
             ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![
-                "echo".into(),
-                "hi".into()
+                lit("echo"),
+                lit("hi")
             ])))
         ))))
     );
@@ -130,12 +180,12 @@ fn pipeline_precedence_is_higher_than_boolean_chain() {
         parsed,
         ParsedCommand::Expr(ShellExpr::BooleanChain {
             first: Box::new(ShellExpr::Pipeline(vec![
-                CommandNode::Simple(SimpleCommand::new(vec!["a".into()])),
-                CommandNode::Simple(SimpleCommand::new(vec!["b".into()])),
+                CommandNode::Simple(SimpleCommand::new(vec![lit("a")])),
+                CommandNode::Simple(SimpleCommand::new(vec![lit("b")])),
             ])),
             rest: vec![(
                 BoolOp::And,
-                ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["c".into()])))
+                ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![lit("c")])))
             )],
         })
     );
@@ -150,16 +200,16 @@ fn boolean_chain_parses_left_to_right() {
         parsed,
         ParsedCommand::Expr(ShellExpr::BooleanChain {
             first: Box::new(ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(
-                vec!["a".into()]
+                vec![lit("a")]
             )))),
             rest: vec![
                 (
                     BoolOp::And,
-                    ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["b".into()])))
+                    ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![lit("b")])))
                 ),
                 (
                     BoolOp::Or,
-                    ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["c".into()])))
+                    ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![lit("c")])))
                 ),
             ],
         })
@@ -174,9 +224,9 @@ fn sequence_parsing_works() {
     assert_eq!(
         parsed,
         ParsedCommand::Expr(ShellExpr::Sequence(vec![
-            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["a".into()]))),
-            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["b".into()]))),
-            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec!["c".into()]))),
+            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![lit("a")]))),
+            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![lit("b")]))),
+            ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![lit("c")]))),
         ]))
     );
 }
@@ -192,11 +242,11 @@ fn redirect_attaches_to_simple_command() {
         parsed,
         ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(
             SimpleCommand::with_redirections(
-                vec!["echo".into(), "hi".into()],
+                vec![lit("echo"), lit("hi")],
                 vec![Redirection {
                     fd: Some(2),
                     kind: RedirectionKind::OutputAppend,
-                    target: "err.log".into(),
+                    target: lit("err.log"),
                 }]
             )
         )))

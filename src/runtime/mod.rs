@@ -13,8 +13,9 @@ use std::{
 use tokio::{io::AsyncWriteExt, process::Command, sync::RwLock};
 
 use crate::{
-    ast::{BoolOp, CommandNode, Redirection, RedirectionKind, ShellExpr, SimpleCommand},
+    ast::{BoolOp, CommandNode, RedirectionKind, ShellExpr, SimpleCommand},
     builtins::BuiltinRegistry,
+    expand::expand_words_with_state,
     parser::ParsedCommand,
     shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellResult},
 };
@@ -53,6 +54,23 @@ struct PipelineOutput {
     exit_code: ExitCode,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct ExpandedRedirection {
+    fd: Option<u8>,
+    kind: RedirectionKind,
+    target: String,
+}
+
+impl ExpandedRedirection {
+    fn effective_fd(&self) -> u8 {
+        match (&self.fd, &self.kind) {
+            (Some(fd), _) => *fd,
+            (None, RedirectionKind::Input) => 0,
+            (None, RedirectionKind::OutputTruncate | RedirectionKind::OutputAppend) => 1,
+        }
+    }
 }
 
 pub type ExecutorFuture<'a> = Pin<Box<dyn Future<Output = ShellResult<ShellAction>> + Send + 'a>>;
@@ -120,7 +138,10 @@ impl BootstrapExecutor {
         simple: &SimpleCommand,
         mode: ExecutionMode,
     ) -> ShellResult<ShellAction> {
-        let Some((name, args)) = simple.argv.split_first() else {
+        let (expanded_argv, expanded_redirections) =
+            expand_simple_command(state.clone(), simple).await?;
+
+        let Some((name, args)) = expanded_argv.split_first() else {
             return Ok(ShellAction::continue_with(CommandOutput::success()));
         };
 
@@ -128,17 +149,23 @@ impl BootstrapExecutor {
 
         if let Some(builtin) = registry.get(name) {
             return self
-                .execute_builtin_simple(state, builtin, args, &simple.redirections, mode)
+                .execute_builtin_simple(state, builtin, args, &expanded_redirections, mode)
                 .await;
         }
 
         match mode {
             ExecutionMode::Normal => {
-                execute_external(state, name, args, &simple.redirections).await
+                execute_external(state, name, args, &expanded_redirections).await
             }
             ExecutionMode::Pipeline => {
                 let output = self
-                    .execute_external_pipeline_segment(state, simple, None)
+                    .execute_external_pipeline_segment(
+                        state,
+                        name,
+                        args,
+                        &expanded_redirections,
+                        None,
+                    )
                     .await?;
 
                 Ok(ShellAction::continue_with(CommandOutput {
@@ -155,7 +182,7 @@ impl BootstrapExecutor {
         state: SharedShellState,
         builtin: Arc<dyn crate::builtins::Builtin>,
         args: &[String],
-        redirections: &[Redirection],
+        redirections: &[ExpandedRedirection],
         mode: ExecutionMode,
     ) -> ShellResult<ShellAction> {
         match mode {
@@ -261,7 +288,10 @@ impl BootstrapExecutor {
     ) -> ShellResult<PipelineOutput> {
         match node {
             CommandNode::Simple(simple) => {
-                let Some((name, args)) = simple.argv.split_first() else {
+                let (expanded_argv, expanded_redirections) =
+                    expand_simple_command(state.clone(), simple).await?;
+
+                let Some((name, args)) = expanded_argv.split_first() else {
                     return Ok(PipelineOutput {
                         exit_code: ExitCode::SUCCESS,
                         stdout: Vec::new(),
@@ -277,7 +307,7 @@ impl BootstrapExecutor {
 
                     return Ok(match result {
                         ShellAction::Continue(output) => {
-                            let plan = match build_redirection_plan(&simple.redirections) {
+                            let plan = match build_redirection_plan(&expanded_redirections) {
                                 Ok(plan) => plan,
                                 Err(err) => {
                                     return Ok(PipelineOutput {
@@ -311,8 +341,14 @@ impl BootstrapExecutor {
                     });
                 }
 
-                self.execute_external_pipeline_segment(state, simple, stdin_data)
-                    .await
+                self.execute_external_pipeline_segment(
+                    state,
+                    name,
+                    args,
+                    &expanded_redirections,
+                    stdin_data,
+                )
+                .await
             }
             CommandNode::Group(expr) | CommandNode::Subshell(expr) => {
                 let action = self
@@ -338,20 +374,14 @@ impl BootstrapExecutor {
     async fn execute_external_pipeline_segment(
         &self,
         state: SharedShellState,
-        simple: &SimpleCommand,
+        program: &str,
+        args: &[String],
+        redirections: &[ExpandedRedirection],
         stdin_data: Option<Vec<u8>>,
     ) -> ShellResult<PipelineOutput> {
         let (cwd, env_map) = {
             let guard = state.read().await;
             (guard.cwd().to_path_buf(), guard.env().clone())
-        };
-
-        let Some((program, args)) = simple.argv.split_first() else {
-            return Ok(PipelineOutput {
-                exit_code: ExitCode::SUCCESS,
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            });
         };
 
         let resolved = match resolve_command_path(program, &env_map) {
@@ -365,7 +395,7 @@ impl BootstrapExecutor {
             }
         };
 
-        let plan = match build_redirection_plan(&simple.redirections) {
+        let plan = match build_redirection_plan(redirections) {
             Ok(plan) => plan,
             Err(err) => {
                 return Ok(PipelineOutput {
@@ -483,10 +513,10 @@ impl BootstrapExecutor {
         rest: &[(BoolOp, ShellExpr)],
         mode: ExecutionMode,
     ) -> ShellResult<ShellAction> {
-        let mut last = self.execute_expr(state.clone(), first, mode).await?;
-        let mut aggregate = match &last {
-            ShellAction::Continue(output) => output.clone(),
-            ShellAction::Exit(code) => return Ok(ShellAction::Exit(*code)),
+        let first_action = self.execute_expr(state.clone(), first, mode).await?;
+        let mut aggregate = match first_action {
+            ShellAction::Continue(output) => output,
+            ShellAction::Exit(code) => return Ok(ShellAction::Exit(code)),
         };
 
         for (op, expr) in rest {
@@ -496,9 +526,8 @@ impl BootstrapExecutor {
             };
 
             if should_run {
-                last = self.execute_expr(state.clone(), expr, mode).await?;
-
-                match last {
+                let next_action = self.execute_expr(state.clone(), expr, mode).await?;
+                match next_action {
                     ShellAction::Continue(output) => {
                         aggregate = merge_outputs(aggregate, output);
                     }
@@ -537,7 +566,7 @@ async fn execute_external(
     state: SharedShellState,
     program: &str,
     args: &[String],
-    redirections: &[Redirection],
+    redirections: &[ExpandedRedirection],
 ) -> ShellResult<ShellAction> {
     let (cwd, env_map) = {
         let guard = state.read().await;
@@ -673,7 +702,7 @@ fn is_executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
-fn build_redirection_plan(redirections: &[Redirection]) -> ShellResult<RedirectionPlan> {
+fn build_redirection_plan(redirections: &[ExpandedRedirection]) -> ShellResult<RedirectionPlan> {
     let mut plan = RedirectionPlan::empty();
 
     for redirect in redirections {
@@ -783,4 +812,37 @@ fn merge_outputs(mut left: CommandOutput, right: CommandOutput) -> CommandOutput
     left.stderr.push_str(&right.stderr);
     left.exit_code = right.exit_code;
     left
+}
+
+async fn expand_simple_command(
+    state: SharedShellState,
+    simple: &SimpleCommand,
+) -> ShellResult<(Vec<String>, Vec<ExpandedRedirection>)> {
+    let argv = expand_words_with_state(state.clone(), &simple.argv).await?;
+
+    let mut redirections = Vec::new();
+    for redirection in &simple.redirections {
+        let target =
+            expand_words_with_state(state.clone(), std::slice::from_ref(&redirection.target))
+                .await?
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+        let fd = redirection
+            .fd
+            .map(|fd| {
+                u8::try_from(fd).map_err(|_| {
+                    crate::shell::ShellError::message(format!("unsupported redirection fd: {fd}"))
+                })
+            })
+            .transpose()?;
+
+        redirections.push(ExpandedRedirection {
+            fd,
+            kind: redirection.kind.clone(),
+            target,
+        });
+    }
+
+    Ok((argv, redirections))
 }
