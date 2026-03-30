@@ -25,9 +25,15 @@ use crate::{
 
 #[derive(Debug)]
 struct RedirectionPlan {
-    stdin: Option<PathBuf>,
+    stdin: Option<InputRedirection>,
     stdout: Option<OutputRedirection>,
     stderr: Option<OutputRedirection>,
+}
+
+#[derive(Debug, Clone)]
+enum InputRedirection {
+    File(PathBuf),
+    Inline(Vec<u8>),
 }
 
 #[derive(Debug, Clone)]
@@ -64,14 +70,14 @@ struct PipelineOutput {
 struct ExpandedRedirection {
     fd: Option<u8>,
     kind: RedirectionKind,
-    target: String,
+    target: Option<String>,
 }
 
 impl ExpandedRedirection {
     fn effective_fd(&self) -> u8 {
         match (&self.fd, &self.kind) {
             (Some(fd), _) => *fd,
-            (None, RedirectionKind::Input) => 0,
+            (None, RedirectionKind::Input | RedirectionKind::HereDoc { .. }) => 0,
             (None, RedirectionKind::OutputTruncate | RedirectionKind::OutputAppend) => 1,
         }
     }
@@ -461,7 +467,7 @@ impl BootstrapExecutor {
         command.env_clear();
         command.envs(env_map);
 
-        if let Some(path) = &plan.stdin {
+        if let Some(InputRedirection::File(path)) = &plan.stdin {
             match open_input_file(path) {
                 Ok(file) => {
                     command.stdin(Stdio::from(file));
@@ -475,7 +481,7 @@ impl BootstrapExecutor {
                     });
                 }
             }
-        } else if stdin_data.is_some() {
+        } else if matches!(plan.stdin, Some(InputRedirection::Inline(_))) || stdin_data.is_some() {
             command.stdin(Stdio::piped());
         } else {
             command.stdin(Stdio::null());
@@ -534,7 +540,13 @@ impl BootstrapExecutor {
             }
         };
 
-        if let Some(input) = stdin_data
+        let stdin_bytes = match (&plan.stdin, stdin_data) {
+            (Some(InputRedirection::Inline(input)), _) => Some(input.clone()),
+            (Some(InputRedirection::File(_)), _) => None,
+            (None, input) => input,
+        };
+
+        if let Some(input) = stdin_bytes
             && let Some(mut stdin) = child.stdin.take()
         {
             stdin.write_all(&input).await?;
@@ -650,7 +662,7 @@ async fn execute_external(
     command.env_clear();
     command.envs(env_map);
 
-    if let Some(path) = &plan.stdin {
+    if let Some(InputRedirection::File(path)) = &plan.stdin {
         match open_input_file(path) {
             Ok(file) => {
                 command.stdin(Stdio::from(file));
@@ -663,6 +675,8 @@ async fn execute_external(
                 }));
             }
         }
+    } else if matches!(plan.stdin, Some(InputRedirection::Inline(_))) {
+        command.stdin(Stdio::piped());
     } else {
         command.stdin(Stdio::inherit());
     }
@@ -707,7 +721,24 @@ async fn execute_external(
         command.stderr(Stdio::inherit());
     }
 
-    let status = match command.status().await {
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return Ok(ShellAction::continue_with(CommandOutput {
+                exit_code: ExitCode::FAILURE,
+                stdout: String::new(),
+                stderr: format!("failed to execute {program}: {err}\n"),
+            }));
+        }
+    };
+
+    if let Some(InputRedirection::Inline(input)) = &plan.stdin
+        && let Some(mut stdin) = child.stdin.take()
+    {
+        stdin.write_all(input).await?;
+    }
+
+    let status = match child.wait().await {
         Ok(status) => status,
         Err(err) => {
             return Ok(ShellAction::continue_with(CommandOutput {
@@ -775,29 +806,34 @@ fn build_redirection_plan(redirections: &[ExpandedRedirection]) -> ShellResult<R
 
         match (&redirect.kind, fd) {
             (RedirectionKind::Input, 0) => {
-                plan.stdin = Some(PathBuf::from(&redirect.target));
+                plan.stdin = Some(InputRedirection::File(PathBuf::from(
+                    redirect.target.as_deref().unwrap_or_default(),
+                )));
+            }
+            (RedirectionKind::HereDoc { body, .. }, 0) => {
+                plan.stdin = Some(InputRedirection::Inline(body.as_bytes().to_vec()));
             }
             (RedirectionKind::OutputTruncate, 1) => {
                 plan.stdout = Some(OutputRedirection {
-                    path: PathBuf::from(&redirect.target),
+                    path: PathBuf::from(redirect.target.as_deref().unwrap_or_default()),
                     append: false,
                 });
             }
             (RedirectionKind::OutputAppend, 1) => {
                 plan.stdout = Some(OutputRedirection {
-                    path: PathBuf::from(&redirect.target),
+                    path: PathBuf::from(redirect.target.as_deref().unwrap_or_default()),
                     append: true,
                 });
             }
             (RedirectionKind::OutputTruncate, 2) => {
                 plan.stderr = Some(OutputRedirection {
-                    path: PathBuf::from(&redirect.target),
+                    path: PathBuf::from(redirect.target.as_deref().unwrap_or_default()),
                     append: false,
                 });
             }
             (RedirectionKind::OutputAppend, 2) => {
                 plan.stderr = Some(OutputRedirection {
-                    path: PathBuf::from(&redirect.target),
+                    path: PathBuf::from(redirect.target.as_deref().unwrap_or_default()),
                     append: true,
                 });
             }
@@ -927,10 +963,73 @@ async fn expand_simple_command(
 
         redirections.push(ExpandedRedirection {
             fd,
-            kind: redirection.kind.clone(),
-            target,
+            kind: match &redirection.kind {
+                RedirectionKind::HereDoc { body, expand } => RedirectionKind::HereDoc {
+                    body: if *expand {
+                        expand_heredoc_body(state.clone(), body).await?
+                    } else {
+                        body.clone()
+                    },
+                    expand: *expand,
+                },
+                other => other.clone(),
+            },
+            target: match &redirection.kind {
+                RedirectionKind::HereDoc { .. } => None,
+                _ => Some(target),
+            },
         });
     }
 
     Ok((argv, redirections))
+}
+
+async fn expand_heredoc_body(state: SharedShellState, body: &str) -> ShellResult<String> {
+    let guard = state.read().await;
+    let mut out = String::new();
+    let mut chars = body.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.peek().copied() {
+                Some('$') | Some('\\') => {
+                    out.push(chars.next().expect("peeked character should exist"));
+                }
+                _ => out.push('\\'),
+            },
+            '$' => match chars.peek().copied() {
+                Some('?') => {
+                    chars.next();
+                    out.push_str(&guard.last_exit_status().as_u8().to_string());
+                }
+                Some(next) if is_var_start(next) => {
+                    let mut name = String::new();
+                    while let Some(next) = chars.peek().copied() {
+                        if is_var_continue(next) {
+                            name.push(next);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if let Some(value) = guard.env_var(&name) {
+                        out.push_str(value);
+                    }
+                }
+                _ => out.push('$'),
+            },
+            _ => out.push(ch),
+        }
+    }
+
+    Ok(out)
+}
+
+fn is_var_start(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_var_continue(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }

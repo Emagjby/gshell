@@ -13,6 +13,7 @@ pub enum Token {
     OrIf,
     Semicolon,
     RedirectIn,
+    RedirectHeredoc,
     RedirectOut,
     RedirectAppend,
     LParen,
@@ -76,7 +77,12 @@ impl Lexer {
                 }
                 '<' => {
                     chars.next();
-                    tokens.push(Token::RedirectIn);
+                    if chars.peek() == Some(&'<') {
+                        chars.next();
+                        tokens.push(Token::RedirectHeredoc);
+                    } else {
+                        tokens.push(Token::RedirectIn);
+                    }
                 }
                 c if c.is_ascii_digit() => {
                     let mut digits = String::new();

@@ -40,6 +40,15 @@ fn unclosed_subshell_is_incomplete() {
 }
 
 #[test]
+fn unterminated_heredoc_is_incomplete() {
+    let validator = ParserValidator::default();
+    assert_validation(
+        validator.validate("cat <<EOF\nhello\n"),
+        ValidationResult::Incomplete,
+    );
+}
+
+#[test]
 fn complete_command_is_complete() {
     let validator = ParserValidator::default();
     assert_validation(validator.validate("echo hello"), ValidationResult::Complete);
