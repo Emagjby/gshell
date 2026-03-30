@@ -12,7 +12,7 @@ use crate::{
     completion::{ShellCompleter, ShellHinter},
     history::{HistoryConfig, should_record_history_entry},
     parser::{ParsedCommand, Parser},
-    prompt::{FallbackPromptRenderer, ReedlinePromptAdapter},
+    prompt::{ConfiguredPromptRenderer, ReedlinePromptAdapter},
     runtime::Executor,
     shell::{ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
     ui::validator::ParserValidator,
@@ -97,7 +97,7 @@ where
     }
 
     pub async fn run(&mut self, state: SharedShellState) -> ShellResult<()> {
-        let renderer = Arc::new(FallbackPromptRenderer);
+        let renderer = Arc::new(ConfiguredPromptRenderer::new());
         let mut prompt = ReedlinePromptAdapter::new(renderer);
 
         loop {

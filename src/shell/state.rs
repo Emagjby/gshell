@@ -6,7 +6,7 @@ use std::{
 
 use tokio::sync::RwLock;
 
-use crate::{history::HistoryConfig, shell::ExitCode};
+use crate::{config::PromptConfig, history::HistoryConfig, shell::ExitCode};
 
 pub type SharedShellState = Arc<RwLock<ShellState>>;
 
@@ -71,8 +71,28 @@ impl FunctionStore {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct RuntimeServices;
+#[derive(Debug, Clone)]
+pub struct RuntimeServices {
+    prompt_config: PromptConfig,
+}
+
+impl Default for RuntimeServices {
+    fn default() -> Self {
+        Self {
+            prompt_config: PromptConfig::from_env(),
+        }
+    }
+}
+
+impl RuntimeServices {
+    pub fn prompt_config(&self) -> &PromptConfig {
+        &self.prompt_config
+    }
+
+    pub fn set_prompt_config(&mut self, config: PromptConfig) {
+        self.prompt_config = config;
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ShellState {
@@ -99,7 +119,7 @@ impl ShellState {
             history: HistoryState::new(history_path),
             aliases: AliasStore::default(),
             functions: FunctionStore::default(),
-            runtime_services: RuntimeServices,
+            runtime_services: RuntimeServices::default(),
         })
     }
 
@@ -165,5 +185,9 @@ impl ShellState {
 
     pub fn runtime_services(&self) -> &RuntimeServices {
         &self.runtime_services
+    }
+
+    pub fn runtime_services_mut(&mut self) -> &mut RuntimeServices {
+        &mut self.runtime_services
     }
 }
