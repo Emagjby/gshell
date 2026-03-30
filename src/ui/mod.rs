@@ -1,3 +1,5 @@
+pub mod validator;
+
 use std::sync::Arc;
 
 use reedline::{FileBackedHistory, Reedline, Signal};
@@ -8,6 +10,7 @@ use crate::{
     prompt::{FallbackPromptRenderer, ReedlinePromptAdapter},
     runtime::Executor,
     shell::{ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
+    ui::validator::ParserValidator,
 };
 
 pub struct Repl<E> {
@@ -33,11 +36,13 @@ where
     pub async fn new(executor: E, state: SharedShellState) -> Self {
         let history = build_history(state.clone()).await;
 
+        let base_editor = Reedline::create().with_validator(Box::new(ParserValidator::default()));
+
         let line_editor = match history {
-            Ok(history) => Reedline::create().with_history(Box::new(history)),
+            Ok(history) => base_editor.with_history(Box::new(history)),
             Err(err) => {
                 eprintln!("warning: failed to initialize history: {err}");
-                Reedline::create()
+                base_editor
             }
         };
 

@@ -1,3 +1,5 @@
+use std::fs;
+
 use gshell::{
     parser::Parser,
     runtime::{BootstrapExecutor, Executor},
@@ -66,5 +68,35 @@ async fn exit_code_propagates_from_external_command() {
             assert!(output.exit_code.is_failure());
         }
         ShellAction::Exit(_) => panic!("false should not exit the shell"),
+    }
+}
+
+#[tokio::test]
+async fn non_executable_path_entry_is_not_resolved_as_command() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let command_path = dir.path().join("demo-command");
+    fs::write(&command_path, "#!/bin/sh\nexit 0\n").expect("stub command should be writable");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+    state
+        .write()
+        .await
+        .set_env_var("PATH", dir.path().display().to_string());
+
+    let parsed = parser.parse("demo-command").expect("parse should succeed");
+
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::FAILURE);
+            assert!(output.stderr.contains("command not found"));
+        }
+        ShellAction::Exit(_) => panic!("unknown command should not exit the shell"),
     }
 }

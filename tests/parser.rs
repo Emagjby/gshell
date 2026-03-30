@@ -162,7 +162,7 @@ fn parses_grouped_command_ast() {
 
     assert_eq!(
         parsed,
-        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Group(Box::new(
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Subshell(Box::new(
             ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(vec![
                 lit("echo"),
                 lit("hi")
