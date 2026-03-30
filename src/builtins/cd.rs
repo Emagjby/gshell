@@ -37,7 +37,11 @@ impl Builtin for CdBuiltin {
 
             match std::fs::canonicalize(&resolved) {
                 Ok(path) => {
-                    state.write().await.set_cwd(path);
+                    let mut guard = state.write().await;
+                    let previous = guard.cwd().to_path_buf();
+                    guard.set_env_var("OLDPWD", previous.display().to_string());
+                    guard.set_env_var("PWD", path.display().to_string());
+                    guard.set_cwd(path);
                     Ok(ShellAction::continue_with(CommandOutput::success()))
                 }
                 Err(err) => Ok(ShellAction::continue_with(CommandOutput {

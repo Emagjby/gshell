@@ -156,6 +156,38 @@ fn parses_redirection_ast() {
 }
 
 #[test]
+fn parses_leading_assignments_as_command_prefix() {
+    let parser = Parser::default();
+    let parsed = parser
+        .parse("NAME=value echo hi")
+        .expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(
+            SimpleCommand::with_assignments(
+                vec![("NAME".into(), lit("value"))],
+                vec![lit("echo"), lit("hi")],
+                vec![],
+            )
+        )))
+    );
+}
+
+#[test]
+fn parses_assignment_only_command() {
+    let parser = Parser::default();
+    let parsed = parser.parse("NAME=value").expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(
+            SimpleCommand::with_assignments(vec![("NAME".into(), lit("value"))], vec![], vec![])
+        )))
+    );
+}
+
+#[test]
 fn parses_grouped_command_ast() {
     let parser = Parser::default();
     let parsed = parser.parse("(echo hi)").expect("parse should succeed");
@@ -265,7 +297,20 @@ fn lexer_tokenizes_nested_command_substitution() {
         vec![
             Token::Word(Word::literal("echo")),
             Token::Word(Word::new(vec![WordSegment::CommandSubstitution {
-                source: "printf $(pwd)".into(),
+                expr: Box::new(ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(
+                    vec![
+                        Word::new(vec![WordSegment::Literal {
+                            text: "printf".into(),
+                            quote: QuoteKind::Unquoted,
+                        }]),
+                        Word::new(vec![WordSegment::CommandSubstitution {
+                            expr: Box::new(ShellExpr::Command(CommandNode::Simple(
+                                SimpleCommand::new(vec![Word::literal("pwd")])
+                            ))),
+                            quote: QuoteKind::Unquoted,
+                        }])
+                    ]
+                )))),
                 quote: QuoteKind::Unquoted,
             }])),
         ]
@@ -284,7 +329,9 @@ fn lexer_tokenizes_double_quoted_command_substitution() {
         vec![
             Token::Word(Word::literal("echo")),
             Token::Word(Word::new(vec![WordSegment::CommandSubstitution {
-                source: "pwd".into(),
+                expr: Box::new(ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(
+                    vec![Word::literal("pwd")]
+                )))),
                 quote: QuoteKind::DoubleQuoted,
             }])),
         ]
@@ -336,7 +383,9 @@ fn parser_keeps_command_substitution_inside_word_segments() {
                         quote: QuoteKind::Unquoted,
                     },
                     WordSegment::CommandSubstitution {
-                        source: "pwd".into(),
+                        expr: Box::new(ShellExpr::Command(CommandNode::Simple(
+                            SimpleCommand::new(vec![Word::literal("pwd")])
+                        ))),
                         quote: QuoteKind::Unquoted,
                     },
                     WordSegment::Literal {

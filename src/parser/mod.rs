@@ -243,13 +243,23 @@ fn parse_subshell(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
 }
 
 fn parse_simple_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
+    let mut assignments = Vec::new();
     let mut argv = Vec::new();
     let mut redirections = Vec::new();
 
     loop {
         match cursor.peek() {
             Some(Token::Word(word)) => {
-                argv.push(word.clone());
+                if argv.is_empty() {
+                    if let Some((name, value)) = word.split_assignment() {
+                        assignments.push((name, value));
+                    } else {
+                        argv.push(word.clone());
+                    }
+                } else {
+                    argv.push(word.clone());
+                }
+
                 cursor.next();
             }
             Some(Token::IoNumber(_))
@@ -262,11 +272,12 @@ fn parse_simple_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
         }
     }
 
-    if argv.is_empty() && redirections.is_empty() {
+    if assignments.is_empty() && argv.is_empty() && redirections.is_empty() {
         return Err(ParseError::invalid("expected simple command"));
     }
 
-    Ok(CommandNode::Simple(SimpleCommand::with_redirections(
+    Ok(CommandNode::Simple(SimpleCommand::with_assignments(
+        assignments,
         argv,
         redirections,
     )))

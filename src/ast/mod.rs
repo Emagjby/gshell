@@ -2,6 +2,7 @@ use crate::expand::Word;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleCommand {
+    pub assignments: Vec<(String, Word)>,
     pub argv: Vec<Word>,
     pub redirections: Vec<Redirection>,
 }
@@ -9,17 +10,34 @@ pub struct SimpleCommand {
 impl SimpleCommand {
     pub fn new(argv: Vec<Word>) -> Self {
         Self {
+            assignments: Vec::new(),
             argv,
             redirections: Vec::new(),
         }
     }
 
     pub fn with_redirections(argv: Vec<Word>, redirections: Vec<Redirection>) -> Self {
-        Self { argv, redirections }
+        Self {
+            assignments: Vec::new(),
+            argv,
+            redirections,
+        }
+    }
+
+    pub fn with_assignments(
+        assignments: Vec<(String, Word)>,
+        argv: Vec<Word>,
+        redirections: Vec<Redirection>,
+    ) -> Self {
+        Self {
+            assignments,
+            argv,
+            redirections,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.argv.is_empty()
+        self.assignments.is_empty() && self.argv.is_empty()
     }
 }
 

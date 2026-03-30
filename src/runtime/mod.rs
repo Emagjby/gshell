@@ -18,9 +18,9 @@ use tokio::{io::AsyncWriteExt, process::Command, sync::RwLock};
 use crate::{
     ast::{BoolOp, CommandNode, RedirectionKind, ShellExpr, SimpleCommand},
     builtins::BuiltinRegistry,
-    expand::expand_words_with_state,
+    expand::{CommandSubstitutionExecutor, expand_words_with_state},
     parser::ParsedCommand,
-    shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellResult},
+    shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
 };
 
 #[derive(Debug)]
@@ -49,6 +49,7 @@ impl RedirectionPlan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExecutionMode {
     Normal,
+    Capture,
     Pipeline,
 }
 
@@ -121,6 +122,25 @@ impl BootstrapExecutor {
         })
     }
 
+    async fn execute_command_substitution(
+        &self,
+        state: SharedShellState,
+        expr: ShellExpr,
+    ) -> ShellResult<String> {
+        let isolated_state = clone_shell_state_for_pipeline(&state).await;
+
+        let action = self
+            .execute_expr(isolated_state, &expr, ExecutionMode::Capture)
+            .await?;
+
+        match action {
+            ShellAction::Continue(output) => Ok(output.stdout),
+            ShellAction::Exit(_) => Err(ShellError::message(
+                "command substitution cannot terminate the parent shell",
+            )),
+        }
+    }
+
     async fn execute_command_node(
         &self,
         state: SharedShellState,
@@ -169,6 +189,23 @@ impl BootstrapExecutor {
             ExecutionMode::Normal => {
                 execute_external(state, name, args, &expanded_redirections).await
             }
+            ExecutionMode::Capture => {
+                let output = self
+                    .execute_external_pipeline_segment(
+                        state,
+                        name,
+                        args,
+                        &expanded_redirections,
+                        None,
+                    )
+                    .await?;
+
+                Ok(ShellAction::continue_with(CommandOutput {
+                    exit_code: output.exit_code,
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                }))
+            }
             ExecutionMode::Pipeline => {
                 let output = self
                     .execute_external_pipeline_segment(
@@ -198,7 +235,7 @@ impl BootstrapExecutor {
         mode: ExecutionMode,
     ) -> ShellResult<ShellAction> {
         match mode {
-            ExecutionMode::Normal => {
+            ExecutionMode::Normal | ExecutionMode::Capture => {
                 let result = builtin.execute(state, args).await?;
 
                 match result {
@@ -846,16 +883,39 @@ async fn expand_simple_command(
     state: SharedShellState,
     simple: &SimpleCommand,
 ) -> ShellResult<(Vec<String>, Vec<ExpandedRedirection>)> {
-    let argv = expand_words_with_state(state.clone(), &simple.argv).await?;
+    let substitution_executor: CommandSubstitutionExecutor = Arc::new(move |state, expr| {
+        let executor = BootstrapExecutor;
+        Box::pin(async move { executor.execute_command_substitution(state, expr).await })
+    });
+
+    for (name, value) in &simple.assignments {
+        let expanded = expand_words_with_state(
+            state.clone(),
+            std::slice::from_ref(value),
+            &substitution_executor,
+        )
+        .await?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+
+        state.write().await.set_env_var(name.clone(), expanded);
+    }
+
+    let argv = expand_words_with_state(state.clone(), &simple.argv, &substitution_executor).await?;
 
     let mut redirections = Vec::new();
     for redirection in &simple.redirections {
-        let target =
-            expand_words_with_state(state.clone(), std::slice::from_ref(&redirection.target))
-                .await?
-                .into_iter()
-                .next()
-                .unwrap_or_default();
+        let target = expand_words_with_state(
+            state.clone(),
+            std::slice::from_ref(&redirection.target),
+            &substitution_executor,
+        )
+        .await?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+
         let fd = redirection
             .fd
             .map(|fd| {
