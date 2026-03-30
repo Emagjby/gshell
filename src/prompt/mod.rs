@@ -1,28 +1,165 @@
-use std::{borrow::Cow, future::Future, pin::Pin, sync::Arc};
+use std::{borrow::Cow, future::Future, path::PathBuf, pin::Pin, sync::Arc};
 
 use reedline::PromptViMode;
-pub use reedline::{DefaultPromptSegment, Prompt, PromptEditMode, PromptHistorySearch};
+pub use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
+use tokio::process::Command;
 
-use crate::shell::{SharedShellState, ShellResult};
+use crate::{
+    config::PromptMode,
+    shell::{SharedShellState, ShellError, ShellResult},
+};
 
-pub type PromptFuture<'a> = Pin<Box<dyn Future<Output = ShellResult<String>> + Send + 'a>>;
+pub type PromptFuture<'a> = Pin<Box<dyn Future<Output = ShellResult<PromptFrame>> + Send + 'a>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptFrame {
+    pub insert_prompt: String,
+    pub right_prompt: String,
+    pub normal_indicator: String,
+    pub multiline_prompt: String,
+}
+
+impl Default for PromptFrame {
+    fn default() -> Self {
+        Self {
+            insert_prompt: "$ ".to_string(),
+            right_prompt: String::new(),
+            normal_indicator: ": ".to_string(),
+            multiline_prompt: "> ".to_string(),
+        }
+    }
+}
 
 pub trait PromptRenderer: Send + Sync {
-    fn render_prompt<'a>(&'a self, state: SharedShellState) -> PromptFuture<'a>;
+    fn render_frame<'a>(&'a self, state: SharedShellState) -> PromptFuture<'a>;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FallbackPromptRenderer;
 
 impl PromptRenderer for FallbackPromptRenderer {
-    fn render_prompt<'a>(&'a self, _state: SharedShellState) -> PromptFuture<'a> {
-        Box::pin(async { Ok("$ ".to_string()) })
+    fn render_frame<'a>(&'a self, _state: SharedShellState) -> PromptFuture<'a> {
+        Box::pin(async { Ok(PromptFrame::default()) })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StarshipPromptRenderer {
+    binary: String,
+}
+
+impl Default for StarshipPromptRenderer {
+    fn default() -> Self {
+        Self {
+            binary: "starship".to_string(),
+        }
+    }
+}
+
+impl StarshipPromptRenderer {
+    pub fn new(binary: impl Into<String>) -> Self {
+        Self {
+            binary: binary.into(),
+        }
+    }
+
+    async fn render_left_prompt(&self, cwd: PathBuf, status: u8) -> ShellResult<String> {
+        let output = Command::new(&self.binary)
+            .arg("prompt")
+            .arg(format!("--status={status}"))
+            .current_dir(cwd)
+            .output()
+            .await
+            .map_err(|err| ShellError::message(format!("starship launch failed: {err}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let reason = if stderr.is_empty() {
+                "starship prompt failed".to_string()
+            } else {
+                format!("starship prompt failed: {stderr}")
+            };
+
+            return Err(ShellError::message(reason));
+        }
+
+        let rendered = String::from_utf8_lossy(&output.stdout)
+            .trim_end_matches(['\n', '\r'])
+            .to_string();
+
+        if rendered.is_empty() {
+            return Err(ShellError::message("starship prompt returned empty output"));
+        }
+
+        Ok(rendered)
+    }
+}
+
+impl PromptRenderer for StarshipPromptRenderer {
+    fn render_frame<'a>(&'a self, state: SharedShellState) -> PromptFuture<'a> {
+        Box::pin(async move {
+            let (cwd, status) = {
+                let guard = state.read().await;
+                (guard.cwd().to_path_buf(), guard.last_exit_status().as_u8())
+            };
+
+            let insert_prompt = self.render_left_prompt(cwd, status).await?;
+
+            Ok(PromptFrame {
+                insert_prompt,
+                right_prompt: String::new(),
+                normal_indicator: ": ".to_string(),
+                multiline_prompt: "> ".to_string(),
+            })
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfiguredPromptRenderer {
+    fallback: FallbackPromptRenderer,
+}
+
+impl Default for ConfiguredPromptRenderer {
+    fn default() -> Self {
+        Self {
+            fallback: FallbackPromptRenderer,
+        }
+    }
+}
+
+impl ConfiguredPromptRenderer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl PromptRenderer for ConfiguredPromptRenderer {
+    fn render_frame<'a>(&'a self, state: SharedShellState) -> PromptFuture<'a> {
+        Box::pin(async move {
+            let config = {
+                let guard = state.read().await;
+                guard.runtime_services().prompt_config().clone()
+            };
+
+            match config.mode() {
+                PromptMode::Internal => self.fallback.render_frame(state).await,
+                PromptMode::Starship | PromptMode::Auto => {
+                    let starship = StarshipPromptRenderer::new(config.starship_binary());
+
+                    match starship.render_frame(state.clone()).await {
+                        Ok(frame) => Ok(frame),
+                        Err(_) => self.fallback.render_frame(state).await,
+                    }
+                }
+            }
+        })
     }
 }
 
 pub struct ReedlinePromptAdapter<R> {
     renderer: Arc<R>,
-    prompt: String,
+    frame: PromptFrame,
 }
 
 impl<R> ReedlinePromptAdapter<R>
@@ -32,16 +169,16 @@ where
     pub fn new(renderer: Arc<R>) -> Self {
         Self {
             renderer,
-            prompt: "$ ".to_string(),
+            frame: PromptFrame::default(),
         }
     }
 
     pub async fn refresh(&mut self, state: SharedShellState) {
-        self.prompt = self
+        self.frame = self
             .renderer
-            .render_prompt(state)
+            .render_frame(state)
             .await
-            .unwrap_or_else(|_| "$ ".to_string());
+            .unwrap_or_else(|_| PromptFrame::default());
     }
 }
 
@@ -50,22 +187,25 @@ where
     R: PromptRenderer,
 {
     fn render_prompt_left(&self) -> Cow<'_, str> {
-        Cow::Borrowed(self.prompt.as_str())
+        Cow::Borrowed("\n\n")
     }
 
     fn render_prompt_right(&self) -> Cow<'_, str> {
-        Cow::Borrowed("")
+        Cow::Borrowed(self.frame.right_prompt.as_str())
     }
 
     fn render_prompt_indicator(&self, edit_mode: PromptEditMode) -> Cow<'_, str> {
         match edit_mode {
-            PromptEditMode::Vi(PromptViMode::Normal) => Cow::Borrowed(": "),
-            _ => Cow::Borrowed(""),
+            PromptEditMode::Vi(PromptViMode::Normal) => Cow::Owned(format!(
+                "{}{}",
+                self.frame.insert_prompt, self.frame.normal_indicator
+            )),
+            _ => Cow::Borrowed(self.frame.insert_prompt.as_str()),
         }
     }
 
     fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        Cow::Borrowed("> ")
+        Cow::Borrowed(self.frame.multiline_prompt.as_str())
     }
 
     fn render_prompt_history_search_indicator(
@@ -81,46 +221,91 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use super::*;
-    use crate::shell::ShellState;
+    use crate::{
+        config::{PromptConfig, PromptMode},
+        shell::ShellState,
+    };
 
     #[tokio::test]
-    async fn test_fallback_prompt_renderer() {
+    async fn fallback_prompt_renderer_returns_default_frame() {
         let renderer = FallbackPromptRenderer;
         let state = ShellState::shared().await.expect("state should initialize");
 
-        let rendered = renderer
-            .render_prompt(state)
+        let frame = renderer
+            .render_frame(state)
             .await
-            .expect("rendering should succeed");
+            .expect("fallback rendering should succeed");
 
-        assert_eq!(rendered, "$ ");
+        assert_eq!(frame, PromptFrame::default());
     }
 
-    #[test]
-    fn test_prompt_indicator_uses_shell_prompt_in_insert_mode() {
-        let adapter = ReedlinePromptAdapter {
-            renderer: Arc::new(FallbackPromptRenderer),
-            prompt: "$ ".to_string(),
-        };
+    #[tokio::test]
+    async fn configured_renderer_respects_internal_mode() {
+        let state = ShellState::shared().await.expect("state should initialize");
+        {
+            let mut guard = state.write().await;
+            guard
+                .runtime_services_mut()
+                .set_prompt_config(PromptConfig::new(PromptMode::Internal));
+        }
 
-        assert_eq!(adapter.render_prompt_left(), "$ ");
+        let renderer = ConfiguredPromptRenderer::new();
+        let frame = renderer
+            .render_frame(state)
+            .await
+            .expect("configured renderer should succeed");
+
+        assert_eq!(frame.insert_prompt, "$ ");
+        assert_eq!(frame.normal_indicator, ": ");
+        assert_eq!(frame.multiline_prompt, "> ");
+    }
+
+    #[tokio::test]
+    async fn configured_renderer_falls_back_when_starship_is_missing() {
+        let state = ShellState::shared().await.expect("state should initialize");
+        {
+            let mut guard = state.write().await;
+            guard.runtime_services_mut().set_prompt_config(
+                PromptConfig::new(PromptMode::Starship)
+                    .with_starship_binary("definitely-not-a-real-starship-binary"),
+            );
+        }
+
+        let renderer = ConfiguredPromptRenderer::new();
+        let frame = renderer
+            .render_frame(state)
+            .await
+            .expect("configured renderer should still succeed via fallback");
+
+        assert_eq!(frame, PromptFrame::default());
+    }
+
+    #[tokio::test]
+    async fn adapter_uses_insert_and_normal_prompt_parts() {
+        let renderer = Arc::new(ConfiguredPromptRenderer::new());
+        let state = ShellState::shared().await.expect("state should initialize");
+        {
+            let mut guard = state.write().await;
+            guard
+                .runtime_services_mut()
+                .set_prompt_config(PromptConfig::new(PromptMode::Internal));
+        }
+        let mut adapter = ReedlinePromptAdapter::new(renderer);
+
+        adapter.refresh(state).await;
+
+        assert_eq!(adapter.render_prompt_left(), "\n\n");
         assert_eq!(
             adapter.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert)),
-            ""
+            "$ "
         );
-    }
-
-    #[test]
-    fn test_prompt_indicator_replaces_shell_prompt_in_normal_mode() {
-        let adapter = ReedlinePromptAdapter {
-            renderer: Arc::new(FallbackPromptRenderer),
-            prompt: "$ ".to_string(),
-        };
-
         assert_eq!(
             adapter.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal)),
-            ": "
+            "$ : "
         );
+        assert_eq!(adapter.render_prompt_multiline_indicator(), "> ");
     }
 }

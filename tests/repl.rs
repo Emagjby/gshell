@@ -7,7 +7,7 @@ use gshell::{
     shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellState},
     ui::{ReplCore, ReplFlow},
 };
-use reedline::{History, Signal};
+use reedline::Signal;
 
 #[derive(Clone, Default)]
 struct RecordingExecutor {
@@ -68,14 +68,18 @@ async fn explicit_exit_terminates_session_cleanly() {
 }
 
 #[tokio::test]
-async fn prompt_shows_dollar_space() {
+async fn prompt_starts_after_two_newlines() {
     let renderer = std::sync::Arc::new(FallbackPromptRenderer);
     let state = ShellState::shared().await.expect("state should initialize");
     let mut prompt = ReedlinePromptAdapter::new(renderer);
 
     prompt.refresh(state).await;
 
-    assert_eq!(prompt.render_prompt_left(), "$ ");
+    assert_eq!(prompt.render_prompt_left(), "\n\n");
+    assert_eq!(
+        prompt.render_prompt_indicator(reedline::PromptEditMode::Default),
+        "$ "
+    );
 }
 
 #[tokio::test]
@@ -97,7 +101,11 @@ async fn prompt_still_available_after_command_execution() {
 
     prompt.refresh(state).await;
 
-    assert_eq!(prompt.render_prompt_left(), "$ ");
+    assert_eq!(prompt.render_prompt_left(), "\n\n");
+    assert_eq!(
+        prompt.render_prompt_indicator(reedline::PromptEditMode::Default),
+        "$ "
+    );
 }
 
 #[tokio::test]
