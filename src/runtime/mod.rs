@@ -19,9 +19,10 @@ use crate::{
     ast::{BoolOp, CommandNode, RedirectionKind, ShellExpr, SimpleCommand},
     builtins::BuiltinRegistry,
     expand::{
-        CommandSubstitutionExecutor, expand_words_pathnames_with_state, expand_words_with_state,
+        CommandSubstitutionExecutor, Word, expand_words_pathnames_with_state,
+        expand_words_with_state,
     },
-    parser::ParsedCommand,
+    parser::{ParsedCommand, Parser},
     shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
 };
 
@@ -921,6 +922,7 @@ async fn expand_simple_command(
     state: SharedShellState,
     simple: &SimpleCommand,
 ) -> ShellResult<(Vec<String>, Vec<ExpandedRedirection>)> {
+    let simple = resolve_aliases(state.clone(), simple).await?;
     let substitution_executor: CommandSubstitutionExecutor = Arc::new(move |state, expr| {
         let executor = BootstrapExecutor;
         Box::pin(async move { executor.execute_command_substitution(state, expr).await })
@@ -986,6 +988,65 @@ async fn expand_simple_command(
     }
 
     Ok((argv, redirections))
+}
+
+async fn resolve_aliases(
+    state: SharedShellState,
+    simple: &SimpleCommand,
+) -> ShellResult<SimpleCommand> {
+    let mut current = simple.clone();
+    let mut seen = std::collections::HashSet::new();
+
+    loop {
+        let Some(first) = current.argv.first() else {
+            return Ok(current);
+        };
+
+        let Some(name) = alias_candidate_name(first) else {
+            return Ok(current);
+        };
+
+        let alias_value = {
+            let guard = state.read().await;
+            guard.aliases().get(name).map(str::to_owned)
+        };
+
+        let Some(alias_value) = alias_value else {
+            return Ok(current);
+        };
+
+        if !seen.insert(name.to_string()) {
+            return Ok(current);
+        }
+
+        let Some(alias_simple) = parse_alias_simple_command(&alias_value)? else {
+            return Ok(current);
+        };
+
+        let mut argv = alias_simple.argv;
+        argv.extend(current.argv.iter().skip(1).cloned());
+
+        let mut redirections = alias_simple.redirections;
+        redirections.extend(current.redirections);
+
+        current = SimpleCommand::with_assignments(current.assignments, argv, redirections);
+    }
+}
+
+fn alias_candidate_name(word: &Word) -> Option<&str> {
+    word.as_unquoted_literal()
+}
+
+fn parse_alias_simple_command(alias_value: &str) -> ShellResult<Option<SimpleCommand>> {
+    let parsed = Parser::default()
+        .parse(alias_value)
+        .map_err(|err| ShellError::message(format!("invalid alias expansion: {err}")))?;
+
+    match parsed {
+        ParsedCommand::Empty => Ok(None),
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(simple))) => Ok(Some(simple)),
+        _ => Ok(None),
+    }
 }
 
 async fn expand_heredoc_body(state: SharedShellState, body: &str) -> ShellResult<String> {

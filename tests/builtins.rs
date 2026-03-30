@@ -1,7 +1,7 @@
 use gshell::{
     builtins::{
-        Builtin, BuiltinRegistry, CdBuiltin, ClearBuiltin, EchoBuiltin, ExitBuiltin,
-        HistoryBuiltin, PwdBuiltin, TypeBuiltin,
+        AliasBuiltin, Builtin, BuiltinRegistry, CdBuiltin, ClearBuiltin, EchoBuiltin, ExitBuiltin,
+        HistoryBuiltin, PwdBuiltin, TypeBuiltin, UnaliasBuiltin,
     },
     parser::Parser,
     runtime::{BootstrapExecutor, Executor},
@@ -15,11 +15,66 @@ fn builtin_registry_lookup_works() {
     assert!(registry.contains("cd"));
     assert!(registry.contains("exit"));
     assert!(registry.contains("clear"));
+    assert!(registry.contains("alias"));
     assert!(registry.contains("type"));
+    assert!(registry.contains("unalias"));
     assert!(registry.contains("echo"));
     assert!(registry.contains("pwd"));
     assert!(registry.contains("history"));
     assert!(registry.get("missing").is_none());
+}
+
+#[tokio::test]
+async fn alias_builtin_sets_and_lists_aliases() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let builtin = AliasBuiltin;
+
+    let result = builtin
+        .execute(state.clone(), &["ll=echo hello".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert!(output.stdout.is_empty());
+            assert_eq!(state.read().await.aliases().get("ll"), Some("echo hello"));
+        }
+        ShellAction::Exit(_) => panic!("alias should not exit"),
+    }
+
+    let result = builtin
+        .execute(state, &["ll".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "alias ll='echo hello'\n");
+        }
+        ShellAction::Exit(_) => panic!("alias should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn unalias_builtin_removes_existing_alias() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    state.write().await.aliases_mut().set("ll", "echo hello");
+    let builtin = UnaliasBuiltin;
+
+    let result = builtin
+        .execute(state.clone(), &["ll".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert!(state.read().await.aliases().get("ll").is_none());
+        }
+        ShellAction::Exit(_) => panic!("unalias should not exit"),
+    }
 }
 
 #[tokio::test]
@@ -138,6 +193,26 @@ async fn type_builtin_reports_builtin() {
         ShellAction::Continue(output) => {
             assert_eq!(output.exit_code, ExitCode::SUCCESS);
             assert!(output.stdout.contains("echo is a shell builtin"));
+        }
+        ShellAction::Exit(_) => panic!("type should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn type_builtin_reports_alias() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    state.write().await.aliases_mut().set("ll", "echo hello");
+    let builtin = TypeBuiltin;
+
+    let result = builtin
+        .execute(state, &["ll".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert!(output.stdout.contains("ll is aliased to `echo hello`"));
         }
         ShellAction::Exit(_) => panic!("type should not exit"),
     }

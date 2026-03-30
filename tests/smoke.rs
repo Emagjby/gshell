@@ -42,6 +42,23 @@ fn shell_state_environment_read_and_write() {
 }
 
 #[test]
+fn alias_store_supports_set_get_remove_and_sorted_entries() {
+    let mut state = ShellState::new().expect("shell state should initialize");
+
+    state.aliases_mut().set("z", "echo z");
+    state.aliases_mut().set("a", "echo a");
+
+    assert_eq!(state.aliases().get("a"), Some("echo a"));
+    assert_eq!(
+        state.aliases().entries(),
+        vec![("a", "echo a"), ("z", "echo z")]
+    );
+
+    assert_eq!(state.aliases_mut().remove("a"), Some("echo a".to_string()));
+    assert!(state.aliases().get("a").is_none());
+}
+
+#[test]
 fn shell_state_last_exit_status_updates() {
     let mut state = ShellState::new().expect("shell state should initialize");
 

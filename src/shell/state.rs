@@ -58,6 +58,20 @@ impl AliasStore {
     pub fn set(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.aliases.insert(name.into(), value.into());
     }
+
+    pub fn remove(&mut self, name: &str) -> Option<String> {
+        self.aliases.remove(name)
+    }
+
+    pub fn entries(&self) -> Vec<(&str, &str)> {
+        let mut entries = self
+            .aliases
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|(name, _)| *name);
+        entries
+    }
 }
 
 #[derive(Debug, Clone, Default)]
