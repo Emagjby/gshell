@@ -7,7 +7,7 @@ use gshell::{
     shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellState},
     ui::{ReplCore, ReplFlow},
 };
-use reedline::Signal;
+use reedline::{History, Signal};
 
 #[derive(Clone, Default)]
 struct RecordingExecutor {

@@ -69,6 +69,12 @@ impl BuiltinRegistry {
         self.builtins.contains_key(name)
     }
 
+    pub fn names(&self) -> Vec<String> {
+        let mut names = self.builtins.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
     pub fn len(&self) -> usize {
         self.builtins.len()
     }

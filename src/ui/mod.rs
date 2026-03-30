@@ -2,9 +2,14 @@ pub mod validator;
 
 use std::sync::Arc;
 
-use reedline::{FileBackedHistory, Reedline, Signal};
+use reedline::{
+    ColumnarMenu, EditCommand, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline,
+    ReedlineEvent, ReedlineMenu, Signal, Vi, default_vi_insert_keybindings,
+    default_vi_normal_keybindings,
+};
 
 use crate::{
+    completion::{ShellCompleter, ShellHinter},
     history::{HistoryConfig, should_record_history_entry},
     parser::{ParsedCommand, Parser},
     prompt::{FallbackPromptRenderer, ReedlinePromptAdapter},
@@ -36,7 +41,46 @@ where
     pub async fn new(executor: E, state: SharedShellState) -> Self {
         let history = build_history(state.clone()).await;
 
-        let base_editor = Reedline::create().with_validator(Box::new(ParserValidator::default()));
+        let completer = Box::new(ShellCompleter::new(state.clone()));
+        let hinter = Box::new(ShellHinter::default());
+
+        let completion_menu = Box::new(ColumnarMenu::default().with_name("completion_menu"));
+
+        let mut insert_keybindings = default_vi_insert_keybindings();
+        let normal_keybindings = default_vi_normal_keybindings();
+
+        insert_keybindings.add_binding(
+            KeyModifiers::NONE,
+            KeyCode::Tab,
+            ReedlineEvent::UntilFound(vec![
+                ReedlineEvent::Menu("completion_menu".to_string()),
+                ReedlineEvent::MenuNext,
+            ]),
+        );
+
+        insert_keybindings.add_binding(
+            KeyModifiers::SHIFT,
+            KeyCode::BackTab,
+            ReedlineEvent::MenuPrevious,
+        );
+
+        insert_keybindings.add_binding(
+            KeyModifiers::NONE,
+            KeyCode::Right,
+            ReedlineEvent::UntilFound(vec![
+                ReedlineEvent::HistoryHintComplete,
+                ReedlineEvent::Edit(vec![EditCommand::MoveRight { select: false }]),
+            ]),
+        );
+
+        let edit_mode = Box::new(Vi::new(insert_keybindings, normal_keybindings));
+
+        let base_editor = Reedline::create()
+            .with_validator(Box::new(ParserValidator::default()))
+            .with_completer(completer)
+            .with_hinter(hinter)
+            .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
+            .with_edit_mode(edit_mode);
 
         let line_editor = match history {
             Ok(history) => base_editor.with_history(Box::new(history)),
@@ -54,7 +98,7 @@ where
 
     pub async fn run(&mut self, state: SharedShellState) -> ShellResult<()> {
         let renderer = Arc::new(FallbackPromptRenderer);
-        let mut prompt = ReedlinePromptAdapter::new(renderer.clone());
+        let mut prompt = ReedlinePromptAdapter::new(renderer);
 
         loop {
             prompt.refresh(state.clone()).await;
