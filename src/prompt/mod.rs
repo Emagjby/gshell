@@ -59,7 +59,7 @@ where
 
     fn render_prompt_indicator(&self, edit_mode: PromptEditMode) -> Cow<'_, str> {
         match edit_mode {
-            PromptEditMode::Vi(PromptViMode::Insert) => Cow::Borrowed(": "),
+            PromptEditMode::Vi(PromptViMode::Normal) => Cow::Borrowed(": "),
             _ => Cow::Borrowed(""),
         }
     }
@@ -95,5 +95,32 @@ mod test {
             .expect("rendering should succeed");
 
         assert_eq!(rendered, "$ ");
+    }
+
+    #[test]
+    fn test_prompt_indicator_uses_shell_prompt_in_insert_mode() {
+        let adapter = ReedlinePromptAdapter {
+            renderer: Arc::new(FallbackPromptRenderer),
+            prompt: "$ ".to_string(),
+        };
+
+        assert_eq!(adapter.render_prompt_left(), "$ ");
+        assert_eq!(
+            adapter.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert)),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_prompt_indicator_replaces_shell_prompt_in_normal_mode() {
+        let adapter = ReedlinePromptAdapter {
+            renderer: Arc::new(FallbackPromptRenderer),
+            prompt: "$ ".to_string(),
+        };
+
+        assert_eq!(
+            adapter.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal)),
+            ": "
+        );
     }
 }

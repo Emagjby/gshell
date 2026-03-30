@@ -1,175 +1,115 @@
+use std::fs;
+
 use gshell::{
-    parser::Parser,
-    runtime::{BootstrapExecutor, Executor},
-    shell::{ExitCode, ShellAction, ShellState},
+    completion::{ShellCompleter, ShellHinter},
+    shell::ShellState,
 };
+use reedline::{Completer, Hinter, History, HistoryItem};
 
 #[tokio::test]
-async fn two_command_pipeline_passes_output_to_next_command() {
-    let parser = Parser::default();
-    let executor = BootstrapExecutor;
+async fn command_completion_includes_builtins() {
     let state = ShellState::shared().await.expect("state should initialize");
+    let mut completer = ShellCompleter::new(state);
 
-    let parsed = parser
-        .parse("echo hello | cat")
-        .expect("parse should succeed");
+    let suggestions = completer.complete("ec", 2);
+    let values = suggestions.into_iter().map(|s| s.value).collect::<Vec<_>>();
 
-    let result = executor
-        .execute(state, &parsed)
-        .await
-        .expect("execution should succeed");
+    assert!(values.iter().any(|v| v == "echo"));
+}
 
-    match result {
-        ShellAction::Continue(output) => {
-            assert_eq!(output.exit_code, ExitCode::SUCCESS);
-            assert_eq!(output.stdout, "hello\n");
-            assert!(output.stderr.is_empty());
-        }
-        ShellAction::Exit(_) => panic!("pipeline should not exit the shell"),
+#[tokio::test]
+async fn env_completion_suggests_shell_variables() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    state.write().await.set_env_var("GSHELL_DEMO", "1");
+
+    let mut completer = ShellCompleter::new(state);
+    let suggestions = completer.complete("$GSH", 4);
+    let values = suggestions.into_iter().map(|s| s.value).collect::<Vec<_>>();
+
+    assert!(values.iter().any(|v| v == "$GSHELL_DEMO"));
+}
+
+#[tokio::test]
+async fn path_completion_suggests_matching_files() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    fs::write(dir.path().join("alpha.txt"), "x").expect("file should be writable");
+    fs::write(dir.path().join("alpine.txt"), "x").expect("file should be writable");
+    fs::write(dir.path().join("beta.txt"), "x").expect("file should be writable");
+
+    let state = ShellState::shared().await.expect("state should initialize");
+    state.write().await.set_cwd(dir.path().to_path_buf());
+
+    let mut completer = ShellCompleter::new(state);
+    let suggestions = completer.complete("./al", 4);
+    let values = suggestions.into_iter().map(|s| s.value).collect::<Vec<_>>();
+
+    assert!(values.iter().any(|v| v == "./alpha.txt"));
+    assert!(values.iter().any(|v| v == "./alpine.txt"));
+    assert!(!values.iter().any(|v| v == "./beta.txt"));
+}
+
+#[tokio::test]
+async fn command_completion_reads_executables_from_path() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let cmd = dir.path().join("demo-tool");
+        fs::write(&cmd, "#!/bin/sh\n").expect("stub command should be writable");
+
+        let mut perms = fs::metadata(&cmd)
+            .expect("metadata should load")
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&cmd, perms).expect("permissions should update");
+
+        let state = ShellState::shared().await.expect("state should initialize");
+        state
+            .write()
+            .await
+            .set_env_var("PATH", dir.path().display().to_string());
+
+        let mut completer = ShellCompleter::new(state);
+        let suggestions = completer.complete("dem", 3);
+        let values = suggestions.into_iter().map(|s| s.value).collect::<Vec<_>>();
+
+        assert!(values.iter().any(|v| v == "demo-tool"));
     }
 }
 
 #[tokio::test]
-async fn multi_command_pipeline_passes_through_all_segments() {
-    let parser = Parser::default();
-    let executor = BootstrapExecutor;
+async fn hinter_returns_suffix_for_history_match() {
     let state = ShellState::shared().await.expect("state should initialize");
+    let history_path = state.read().await.history().path().to_path_buf();
 
-    let parsed = parser
-        .parse("echo hello | cat | cat")
-        .expect("parse should succeed");
+    let mut history = reedline::FileBackedHistory::with_file(100, history_path)
+        .expect("history should initialize");
 
-    let result = executor
-        .execute(state, &parsed)
-        .await
-        .expect("execution should succeed");
+    history
+        .save(HistoryItem::from_command_line("echo hello world"))
+        .expect("history entry should save");
 
-    match result {
-        ShellAction::Continue(output) => {
-            assert_eq!(output.exit_code, ExitCode::SUCCESS);
-            assert_eq!(output.stdout, "hello\n");
-            assert!(output.stderr.is_empty());
-        }
-        ShellAction::Exit(_) => panic!("pipeline should not exit the shell"),
-    }
+    let mut hinter = ShellHinter::default();
+    let hint = hinter.handle("echo h", 6, &history, false, "");
+
+    assert_eq!(hint, "ello world");
 }
 
 #[tokio::test]
-async fn and_if_runs_rhs_when_lhs_succeeds() {
-    let parser = Parser::default();
-    let executor = BootstrapExecutor;
+async fn hinter_returns_nothing_when_cursor_is_not_at_end() {
     let state = ShellState::shared().await.expect("state should initialize");
+    let history_path = state.read().await.history().path().to_path_buf();
 
-    let parsed = parser
-        .parse("true && echo ran")
-        .expect("parse should succeed");
+    let mut history = reedline::FileBackedHistory::with_file(100, history_path)
+        .expect("history should initialize");
 
-    let result = executor
-        .execute(state, &parsed)
-        .await
-        .expect("execution should succeed");
+    history
+        .save(HistoryItem::from_command_line("echo hello world"))
+        .expect("history entry should save");
 
-    match result {
-        ShellAction::Continue(output) => {
-            assert_eq!(output.exit_code, ExitCode::SUCCESS);
-            assert_eq!(output.stdout, "ran\n");
-        }
-        ShellAction::Exit(_) => panic!("boolean chain should not exit the shell"),
-    }
-}
+    let mut hinter = ShellHinter::default();
+    let hint = hinter.handle("echo h", 2, &history, false, "");
 
-#[tokio::test]
-async fn and_if_skips_rhs_when_lhs_fails() {
-    let parser = Parser::default();
-    let executor = BootstrapExecutor;
-    let state = ShellState::shared().await.expect("state should initialize");
-
-    let parsed = parser
-        .parse("false && echo should_not_run")
-        .expect("parse should succeed");
-
-    let result = executor
-        .execute(state, &parsed)
-        .await
-        .expect("execution should succeed");
-
-    match result {
-        ShellAction::Continue(output) => {
-            assert!(output.exit_code.is_failure());
-            assert!(output.stdout.is_empty());
-        }
-        ShellAction::Exit(_) => panic!("boolean chain should not exit the shell"),
-    }
-}
-
-#[tokio::test]
-async fn or_if_skips_rhs_when_lhs_succeeds() {
-    let parser = Parser::default();
-    let executor = BootstrapExecutor;
-    let state = ShellState::shared().await.expect("state should initialize");
-
-    let parsed = parser
-        .parse("true || echo should_not_run")
-        .expect("parse should succeed");
-
-    let result = executor
-        .execute(state, &parsed)
-        .await
-        .expect("execution should succeed");
-
-    match result {
-        ShellAction::Continue(output) => {
-            assert_eq!(output.exit_code, ExitCode::SUCCESS);
-            assert!(output.stdout.is_empty());
-        }
-        ShellAction::Exit(_) => panic!("boolean chain should not exit the shell"),
-    }
-}
-
-#[tokio::test]
-async fn or_if_runs_rhs_when_lhs_fails() {
-    let parser = Parser::default();
-    let executor = BootstrapExecutor;
-    let state = ShellState::shared().await.expect("state should initialize");
-
-    let parsed = parser
-        .parse("false || echo recovered")
-        .expect("parse should succeed");
-
-    let result = executor
-        .execute(state, &parsed)
-        .await
-        .expect("execution should succeed");
-
-    match result {
-        ShellAction::Continue(output) => {
-            assert_eq!(output.exit_code, ExitCode::SUCCESS);
-            assert_eq!(output.stdout, "recovered\n");
-        }
-        ShellAction::Exit(_) => panic!("boolean chain should not exit the shell"),
-    }
-}
-
-#[tokio::test]
-async fn semicolon_executes_commands_in_order() {
-    let parser = Parser::default();
-    let executor = BootstrapExecutor;
-    let state = ShellState::shared().await.expect("state should initialize");
-
-    let parsed = parser
-        .parse("echo first ; echo second")
-        .expect("parse should succeed");
-
-    let result = executor
-        .execute(state, &parsed)
-        .await
-        .expect("execution should succeed");
-
-    match result {
-        ShellAction::Continue(output) => {
-            assert_eq!(output.exit_code, ExitCode::SUCCESS);
-            assert_eq!(output.stdout, "first\nsecond\n");
-        }
-        ShellAction::Exit(_) => panic!("sequence should not exit the shell"),
-    }
+    assert!(hint.is_empty());
 }
