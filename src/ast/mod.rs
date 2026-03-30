@@ -77,6 +77,7 @@ pub enum RedirectionKind {
     Input,
     OutputTruncate,
     OutputAppend,
+    HereDoc { body: String, expand: bool },
 }
 
 impl Redirection {
@@ -84,7 +85,12 @@ impl Redirection {
         match (&self.fd, &self.kind) {
             (Some(fd), _) => *fd as u8,
             (None, RedirectionKind::Input) => 0,
-            (None, RedirectionKind::OutputTruncate | RedirectionKind::OutputAppend) => 1,
+            (
+                None,
+                RedirectionKind::OutputTruncate
+                | RedirectionKind::OutputAppend
+                | RedirectionKind::HereDoc { .. },
+            ) => 1,
         }
     }
 }

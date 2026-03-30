@@ -216,3 +216,113 @@ async fn input_redirection_target_expands_environment_variables() {
     let content = fs::read_to_string(output).expect("captured output should be readable");
     assert_eq!(content, "hello from file\n");
 }
+
+#[tokio::test]
+async fn basic_heredoc_execution_feeds_stdin() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let output = dir.path().join("captured.txt");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse(&format!(
+            "cat <<EOF > {}\nhello from heredoc\nEOF\n",
+            output.display()
+        ))
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert!(output.stdout.is_empty());
+        }
+        ShellAction::Exit(_) => panic!("cat should not exit"),
+    }
+
+    let content = fs::read_to_string(output).expect("captured output should be readable");
+    assert_eq!(content, "hello from heredoc\n");
+}
+
+#[tokio::test]
+async fn unquoted_heredoc_expands_environment_variables() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let output = dir.path().join("captured.txt");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+    state.write().await.set_env_var("HEREDOC_VALUE", "expanded");
+
+    let parsed = parser
+        .parse(&format!(
+            "cat <<EOF > {}\nvalue:$HEREDOC_VALUE\nEOF\n",
+            output.display()
+        ))
+        .expect("parse should succeed");
+
+    let _ = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    let content = fs::read_to_string(output).expect("captured output should be readable");
+    assert_eq!(content, "value:expanded\n");
+}
+
+#[tokio::test]
+async fn quoted_heredoc_preserves_literal_body_text() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let output = dir.path().join("captured.txt");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+    state.write().await.set_env_var("HEREDOC_VALUE", "expanded");
+
+    let parsed = parser
+        .parse(&format!(
+            "cat <<'EOF' > {}\nvalue:$HEREDOC_VALUE\nEOF\n",
+            output.display()
+        ))
+        .expect("parse should succeed");
+
+    let _ = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    let content = fs::read_to_string(output).expect("captured output should be readable");
+    assert_eq!(content, "value:$HEREDOC_VALUE\n");
+}
+
+#[tokio::test]
+async fn last_heredoc_wins_when_multiple_are_present() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let output = dir.path().join("captured.txt");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse(&format!(
+            "cat <<FIRST <<SECOND > {}\nfirst body\nFIRST\nsecond body\nSECOND\n",
+            output.display()
+        ))
+        .expect("parse should succeed");
+
+    let _ = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    let content = fs::read_to_string(output).expect("captured output should be readable");
+    assert_eq!(content, "second body\n");
+}

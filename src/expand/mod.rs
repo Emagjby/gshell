@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
-    ast::ShellExpr,
+    ast::{BoolOp, CommandNode, RedirectionKind, ShellExpr},
     shell::{ExitCode, SharedShellState, ShellResult, ShellState},
 };
 
@@ -56,6 +56,34 @@ impl Word {
 
         Some((name.to_string(), Word::new(value_segments)))
     }
+
+    pub fn quote_removed_text(&self) -> String {
+        let mut out = String::new();
+
+        for segment in &self.segments {
+            match segment {
+                WordSegment::Literal { text, .. } => out.push_str(text),
+                WordSegment::Variable { name, .. } => {
+                    out.push('$');
+                    out.push_str(name);
+                }
+                WordSegment::LastStatus { .. } => out.push_str("$?"),
+                WordSegment::CommandSubstitution { expr, .. } => {
+                    out.push_str("$(");
+                    out.push_str(&render_shell_expr(expr));
+                    out.push(')');
+                }
+            }
+        }
+
+        out
+    }
+
+    pub fn is_quoted(&self) -> bool {
+        self.segments
+            .iter()
+            .any(|segment| !matches!(segment.quote_kind(), QuoteKind::Unquoted))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +103,17 @@ pub enum WordSegment {
         expr: Box<ShellExpr>,
         quote: QuoteKind,
     },
+}
+
+impl WordSegment {
+    pub fn quote_kind(&self) -> QuoteKind {
+        match self {
+            WordSegment::Literal { quote, .. }
+            | WordSegment::Variable { quote, .. }
+            | WordSegment::LastStatus { quote }
+            | WordSegment::CommandSubstitution { quote, .. } => *quote,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,4 +251,61 @@ fn is_valid_assignment_name(name: &str) -> bool {
     }
 
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn render_shell_expr(expr: &ShellExpr) -> String {
+    match expr {
+        ShellExpr::Command(node) => render_command_node(node),
+        ShellExpr::Pipeline(nodes) => nodes
+            .iter()
+            .map(render_command_node)
+            .collect::<Vec<_>>()
+            .join(" | "),
+        ShellExpr::BooleanChain { first, rest } => {
+            let mut out = render_shell_expr(first);
+            for (op, expr) in rest {
+                let op = match op {
+                    BoolOp::And => "&&",
+                    BoolOp::Or => "||",
+                };
+                out.push(' ');
+                out.push_str(op);
+                out.push(' ');
+                out.push_str(&render_shell_expr(expr));
+            }
+            out
+        }
+        ShellExpr::Sequence(exprs) => exprs
+            .iter()
+            .map(render_shell_expr)
+            .collect::<Vec<_>>()
+            .join(" ; "),
+    }
+}
+
+fn render_command_node(node: &CommandNode) -> String {
+    match node {
+        CommandNode::Simple(simple) => {
+            let mut parts = simple
+                .argv
+                .iter()
+                .map(Word::quote_removed_text)
+                .collect::<Vec<_>>();
+
+            parts.extend(simple.redirections.iter().map(|redirection| {
+                let fd = redirection.fd.map(|fd| fd.to_string()).unwrap_or_default();
+                let op = match &redirection.kind {
+                    RedirectionKind::Input => "<",
+                    RedirectionKind::OutputTruncate => ">",
+                    RedirectionKind::OutputAppend => ">>",
+                    RedirectionKind::HereDoc { .. } => "<<",
+                };
+
+                format!("{fd}{op}{}", redirection.target.quote_removed_text())
+            }));
+
+            parts.join(" ")
+        }
+        CommandNode::Subshell(expr) => format!("({})", render_shell_expr(expr)),
+    }
 }

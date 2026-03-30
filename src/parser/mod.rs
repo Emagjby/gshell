@@ -58,7 +58,23 @@ impl Parser {
             return Err(ParseError::invalid("input contains a null byte"));
         }
 
-        let tokens = self.lexer.tokenize(input).map_err(|err| {
+        if input.contains("<<")
+            && let Some(parsed) = self.parse_with_heredocs(input)?
+        {
+            return Ok(parsed);
+        }
+
+        self.parse_complete_source(input)
+    }
+
+    fn parse_complete_source(&self, input: &str) -> ParseResult<ParsedCommand> {
+        let tokens = self.tokenize(input)?;
+
+        parse_tokens(tokens)
+    }
+
+    fn tokenize(&self, input: &str) -> ParseResult<Vec<Token>> {
+        self.lexer.tokenize(input).map_err(|err| {
             let msg = err.to_string();
 
             if matches_incomplete_lex_error(&msg) {
@@ -66,24 +82,60 @@ impl Parser {
             } else {
                 ParseError::invalid(msg)
             }
-        })?;
-
-        if tokens.is_empty() {
-            return Ok(ParsedCommand::Empty);
-        }
-
-        let mut cursor = TokenCursor::new(tokens);
-        let expr = parse_sequence(&mut cursor)?;
-
-        if !cursor.is_eof() {
-            return Err(ParseError::invalid(format!(
-                "unexpected trailing token: {:?}",
-                cursor.peek()
-            )));
-        }
-
-        Ok(ParsedCommand::Expr(expr))
+        })
     }
+
+    fn parse_with_heredocs(&self, input: &str) -> ParseResult<Option<ParsedCommand>> {
+        let mut command_source = String::new();
+        let mut consumed = 0usize;
+
+        for line in input.split_inclusive('\n') {
+            command_source.push_str(line);
+            consumed += line.len();
+
+            let mut parsed = match self.parse_complete_source(&command_source) {
+                Ok(parsed) => parsed,
+                Err(err) if err.kind == ParseErrorKind::Incomplete => continue,
+                Err(err) => return Err(err),
+            };
+
+            if heredoc_count(&parsed) == 0 {
+                continue;
+            }
+
+            collect_heredoc_bodies(&mut parsed, &input[consumed..])?;
+            return Ok(Some(parsed));
+        }
+
+        if !command_source.is_empty() {
+            let mut parsed = self.parse_complete_source(&command_source)?;
+
+            if heredoc_count(&parsed) > 0 {
+                collect_heredoc_bodies(&mut parsed, "")?;
+                return Ok(Some(parsed));
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+fn parse_tokens(tokens: Vec<Token>) -> ParseResult<ParsedCommand> {
+    if tokens.is_empty() {
+        return Ok(ParsedCommand::Empty);
+    }
+
+    let mut cursor = TokenCursor::new(tokens);
+    let expr = parse_sequence(&mut cursor)?;
+
+    if !cursor.is_eof() {
+        return Err(ParseError::invalid(format!(
+            "unexpected trailing token: {:?}",
+            cursor.peek()
+        )));
+    }
+
+    Ok(ParsedCommand::Expr(expr))
 }
 
 fn matches_incomplete_lex_error(msg: &str) -> bool {
@@ -210,6 +262,7 @@ fn parse_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
         Some(Token::Word(_))
         | Some(Token::IoNumber(_))
         | Some(Token::RedirectIn)
+        | Some(Token::RedirectHeredoc)
         | Some(Token::RedirectOut)
         | Some(Token::RedirectAppend) => parse_simple_command(cursor),
         Some(Token::RParen) => Err(ParseError::invalid("unexpected ')'")),
@@ -264,6 +317,7 @@ fn parse_simple_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
             }
             Some(Token::IoNumber(_))
             | Some(Token::RedirectIn)
+            | Some(Token::RedirectHeredoc)
             | Some(Token::RedirectOut)
             | Some(Token::RedirectAppend) => {
                 redirections.push(parse_redirection(cursor)?);
@@ -293,6 +347,10 @@ fn parse_redirection(cursor: &mut TokenCursor) -> ParseResult<Redirection> {
 
     let kind = match cursor.next() {
         Some(Token::RedirectIn) => RedirectionKind::Input,
+        Some(Token::RedirectHeredoc) => RedirectionKind::HereDoc {
+            body: String::new(),
+            expand: true,
+        },
         Some(Token::RedirectOut) => RedirectionKind::OutputTruncate,
         Some(Token::RedirectAppend) => RedirectionKind::OutputAppend,
         other => {
@@ -315,4 +373,145 @@ fn parse_redirection(cursor: &mut TokenCursor) -> ParseResult<Redirection> {
     };
 
     Ok(Redirection { fd, kind, target })
+}
+
+fn heredoc_count(command: &ParsedCommand) -> usize {
+    match command {
+        ParsedCommand::Empty => 0,
+        ParsedCommand::Expr(expr) => heredoc_count_expr(expr),
+    }
+}
+
+fn heredoc_count_expr(expr: &ShellExpr) -> usize {
+    match expr {
+        ShellExpr::Command(node) => heredoc_count_node(node),
+        ShellExpr::Pipeline(nodes) => nodes.iter().map(heredoc_count_node).sum(),
+        ShellExpr::BooleanChain { first, rest } => {
+            heredoc_count_expr(first)
+                + rest
+                    .iter()
+                    .map(|(_, expr)| heredoc_count_expr(expr))
+                    .sum::<usize>()
+        }
+        ShellExpr::Sequence(exprs) => exprs.iter().map(heredoc_count_expr).sum(),
+    }
+}
+
+fn heredoc_count_node(node: &CommandNode) -> usize {
+    match node {
+        CommandNode::Simple(simple) => simple
+            .redirections
+            .iter()
+            .filter(|redir| matches!(redir.kind, RedirectionKind::HereDoc { .. }))
+            .count(),
+        CommandNode::Subshell(expr) => heredoc_count_expr(expr),
+    }
+}
+
+fn collect_heredoc_bodies(command: &mut ParsedCommand, remainder: &str) -> ParseResult<()> {
+    let ParsedCommand::Expr(expr) = command else {
+        return Ok(());
+    };
+
+    let mut cursor = HeredocBodyCursor::new(remainder);
+    fill_expr_heredocs(expr, &mut cursor)?;
+
+    if cursor.has_remaining_content() {
+        return Err(ParseError::invalid(
+            "unexpected trailing content after heredoc terminator",
+        ));
+    }
+
+    Ok(())
+}
+
+fn fill_expr_heredocs(expr: &mut ShellExpr, cursor: &mut HeredocBodyCursor<'_>) -> ParseResult<()> {
+    match expr {
+        ShellExpr::Command(node) => fill_node_heredocs(node, cursor),
+        ShellExpr::Pipeline(nodes) => {
+            for node in nodes {
+                fill_node_heredocs(node, cursor)?;
+            }
+
+            Ok(())
+        }
+        ShellExpr::BooleanChain { first, rest } => {
+            fill_expr_heredocs(first, cursor)?;
+            for (_, expr) in rest {
+                fill_expr_heredocs(expr, cursor)?;
+            }
+
+            Ok(())
+        }
+        ShellExpr::Sequence(exprs) => {
+            for expr in exprs {
+                fill_expr_heredocs(expr, cursor)?;
+            }
+
+            Ok(())
+        }
+    }
+}
+
+fn fill_node_heredocs(
+    node: &mut CommandNode,
+    cursor: &mut HeredocBodyCursor<'_>,
+) -> ParseResult<()> {
+    match node {
+        CommandNode::Simple(simple) => {
+            for redirection in &mut simple.redirections {
+                let RedirectionKind::HereDoc { body, expand } = &mut redirection.kind else {
+                    continue;
+                };
+
+                *expand = !redirection.target.is_quoted();
+                *body = cursor.collect_body(redirection.target.quote_removed_text())?;
+            }
+
+            Ok(())
+        }
+        CommandNode::Subshell(expr) => fill_expr_heredocs(expr, cursor),
+    }
+}
+
+struct HeredocBodyCursor<'a> {
+    lines: Vec<&'a str>,
+    pos: usize,
+}
+
+impl<'a> HeredocBodyCursor<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            lines: source.split_inclusive('\n').collect(),
+            pos: 0,
+        }
+    }
+
+    fn collect_body(&mut self, delimiter: String) -> ParseResult<String> {
+        let mut body = String::new();
+
+        while let Some(line) = self.lines.get(self.pos).copied() {
+            self.pos += 1;
+
+            if normalize_heredoc_line(line) == delimiter {
+                return Ok(body);
+            }
+
+            body.push_str(line);
+        }
+
+        Err(ParseError::incomplete(format!(
+            "heredoc missing terminator: {delimiter}"
+        )))
+    }
+
+    fn has_remaining_content(&self) -> bool {
+        self.lines[self.pos..]
+            .iter()
+            .any(|line| !normalize_heredoc_line(line).is_empty())
+    }
+}
+
+fn normalize_heredoc_line(line: &str) -> String {
+    line.trim_end_matches(['\r', '\n']).to_string()
 }

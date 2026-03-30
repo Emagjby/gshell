@@ -38,7 +38,7 @@ fn operator_tokenization_works() {
 fn redirect_tokenization_works() {
     let lexer = Lexer;
     let tokens = lexer
-        .tokenize("echo hi > out 2>> err < in")
+        .tokenize("echo hi > out 2>> err < in <<EOF")
         .expect("tokenization should succeed");
 
     assert_eq!(
@@ -53,6 +53,8 @@ fn redirect_tokenization_works() {
             Token::Word(lit("err")),
             Token::RedirectIn,
             Token::Word(lit("in")),
+            Token::RedirectHeredoc,
+            Token::Word(lit("EOF")),
         ]
     );
 }
@@ -283,6 +285,70 @@ fn redirect_attaches_to_simple_command() {
             )
         )))
     );
+}
+
+#[test]
+fn parses_heredoc_descriptor_and_body() {
+    let parser = Parser::default();
+    let parsed = parser
+        .parse("cat <<EOF\nhello\nEOF\n")
+        .expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(
+            SimpleCommand::with_redirections(
+                vec![lit("cat")],
+                vec![Redirection {
+                    fd: None,
+                    kind: RedirectionKind::HereDoc {
+                        body: "hello\n".into(),
+                        expand: true,
+                    },
+                    target: lit("EOF"),
+                }],
+            )
+        )))
+    );
+}
+
+#[test]
+fn quoted_heredoc_delimiter_disables_expansion() {
+    let parser = Parser::default();
+    let parsed = parser
+        .parse("cat <<'EOF'\nhello $HOME\nEOF\n")
+        .expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(
+            SimpleCommand::with_redirections(
+                vec![lit("cat")],
+                vec![Redirection {
+                    fd: None,
+                    kind: RedirectionKind::HereDoc {
+                        body: "hello $HOME\n".into(),
+                        expand: false,
+                    },
+                    target: Word::new(vec![WordSegment::Literal {
+                        text: "EOF".into(),
+                        quote: QuoteKind::SingleQuoted,
+                    }]),
+                }],
+            )
+        )))
+    );
+}
+
+#[test]
+fn parser_reports_missing_heredoc_terminator_as_incomplete() {
+    let parser = Parser::default();
+    let err = parser
+        .parse("cat <<EOF\nhello\n")
+        .expect_err("parse should fail");
+
+    assert_eq!(err.kind, ParseErrorKind::Incomplete);
+    assert!(err.message.contains("heredoc missing terminator"));
 }
 
 #[test]
