@@ -1,4 +1,10 @@
-use std::{borrow::Cow, future::Future, path::PathBuf, pin::Pin, sync::Arc};
+use std::{
+    borrow::Cow,
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    sync::{Arc, RwLock},
+};
 
 use reedline::PromptViMode;
 pub use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
@@ -160,6 +166,7 @@ impl PromptRenderer for ConfiguredPromptRenderer {
 pub struct ReedlinePromptAdapter<R> {
     renderer: Arc<R>,
     frame: PromptFrame,
+    menu_prompt: Arc<RwLock<String>>,
 }
 
 impl<R> ReedlinePromptAdapter<R>
@@ -167,9 +174,19 @@ where
     R: PromptRenderer,
 {
     pub fn new(renderer: Arc<R>) -> Self {
+        Self::with_menu_prompt(renderer, Arc::new(RwLock::new(String::new())))
+    }
+
+    pub fn with_menu_prompt(renderer: Arc<R>, menu_prompt: Arc<RwLock<String>>) -> Self {
+        let frame = PromptFrame::default();
+        *menu_prompt
+            .write()
+            .expect("menu prompt lock should not be poisoned") = frame.insert_prompt.clone();
+
         Self {
             renderer,
-            frame: PromptFrame::default(),
+            frame,
+            menu_prompt,
         }
     }
 
@@ -179,6 +196,11 @@ where
             .render_frame(state)
             .await
             .unwrap_or_else(|_| PromptFrame::default());
+
+        *self
+            .menu_prompt
+            .write()
+            .expect("menu prompt lock should not be poisoned") = self.frame.insert_prompt.clone();
     }
 }
 
@@ -293,7 +315,8 @@ mod test {
                 .runtime_services_mut()
                 .set_prompt_config(PromptConfig::new(PromptMode::Internal));
         }
-        let mut adapter = ReedlinePromptAdapter::new(renderer);
+        let menu_prompt = Arc::new(RwLock::new(String::new()));
+        let mut adapter = ReedlinePromptAdapter::with_menu_prompt(renderer, menu_prompt.clone());
 
         adapter.refresh(state).await;
 
@@ -307,5 +330,12 @@ mod test {
             "$ : "
         );
         assert_eq!(adapter.render_prompt_multiline_indicator(), "> ");
+        assert_eq!(
+            menu_prompt
+                .read()
+                .expect("menu prompt lock should not be poisoned")
+                .as_str(),
+            "$ "
+        );
     }
 }

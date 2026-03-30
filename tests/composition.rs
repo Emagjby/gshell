@@ -49,6 +49,20 @@ async fn path_completion_suggests_matching_files() {
 }
 
 #[tokio::test]
+async fn path_completion_does_not_append_whitespace() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    fs::write(dir.path().join("alpha.txt"), "x").expect("file should be writable");
+
+    let state = ShellState::shared().await.expect("state should initialize");
+    state.write().await.set_cwd(dir.path().to_path_buf());
+
+    let mut completer = ShellCompleter::new(state);
+    let suggestions = completer.complete("./al", 4);
+
+    assert!(suggestions.iter().all(|s| !s.append_whitespace));
+}
+
+#[tokio::test]
 async fn command_completion_reads_executables_from_path() {
     #[cfg(unix)]
     {

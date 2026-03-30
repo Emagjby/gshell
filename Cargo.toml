@@ -7,6 +7,7 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1.0.102"
+nu-ansi-term = "0.50.3"
 reedline = "0.46.0"
 tokio = { version = "1.50.0", features = ["full"] }
 tracing = "0.1.44"

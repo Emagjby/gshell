@@ -6,7 +6,11 @@ use std::{
 
 use tokio::sync::RwLock;
 
-use crate::{config::PromptConfig, history::HistoryConfig, shell::ExitCode};
+use crate::{
+    config::{HighlighterConfig, PromptConfig},
+    history::HistoryConfig,
+    shell::ExitCode,
+};
 
 pub type SharedShellState = Arc<RwLock<ShellState>>;
 
@@ -74,12 +78,14 @@ impl FunctionStore {
 #[derive(Debug, Clone)]
 pub struct RuntimeServices {
     prompt_config: PromptConfig,
+    highlighter_config: HighlighterConfig,
 }
 
 impl Default for RuntimeServices {
     fn default() -> Self {
         Self {
             prompt_config: PromptConfig::from_env(),
+            highlighter_config: HighlighterConfig::from_env(),
         }
     }
 }
@@ -91,6 +97,14 @@ impl RuntimeServices {
 
     pub fn set_prompt_config(&mut self, config: PromptConfig) {
         self.prompt_config = config;
+    }
+
+    pub fn highlighter_config(&self) -> &HighlighterConfig {
+        &self.highlighter_config
+    }
+
+    pub fn set_highlighter_config(&mut self, config: HighlighterConfig) {
+        self.highlighter_config = config;
     }
 }
 
