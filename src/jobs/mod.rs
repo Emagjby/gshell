@@ -142,7 +142,7 @@ impl Jobs {
         process.state = state;
         job.state = derive_job_state(&job.processes);
 
-        if matches!(job.state, JobState::Completed) && self.foreground_job == Some(job_id) {
+        if !matches!(job.state, JobState::Running) && self.foreground_job == Some(job_id) {
             self.foreground_job = None;
         }
 
@@ -270,6 +270,24 @@ mod tests {
         assert_eq!(
             jobs.get(id).expect("job should exist").state(),
             JobState::Completed
+        );
+    }
+
+    #[test]
+    fn stopped_foreground_job_releases_foreground_slot() {
+        let mut jobs = Jobs::default();
+        let id = jobs.insert(
+            3000,
+            "sleep 10",
+            JobDisposition::Foreground,
+            vec![ProcessRecord::new(3000, "sleep 10")],
+        );
+
+        assert!(jobs.update_process_state(id, 3000, ProcessState::Stopped));
+        assert_eq!(jobs.foreground_job(), None);
+        assert_eq!(
+            jobs.get(id).expect("job should exist").state(),
+            JobState::Stopped
         );
     }
 }

@@ -4,6 +4,7 @@ use std::{
     ffi::OsString,
     fs::{File, OpenOptions},
     future::Future,
+    io,
     path::{Path, PathBuf},
     pin::Pin,
     process::Stdio,
@@ -13,7 +14,14 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use tokio::{io::AsyncWriteExt, process::Command, sync::RwLock};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    process::Command,
+    sync::RwLock,
+    task::JoinHandle,
+};
+
+mod unix;
 
 use crate::{
     ast::{BoolOp, CommandNode, RedirectionKind, ShellExpr, SimpleCommand},
@@ -82,6 +90,7 @@ struct PipelineJobContext {
     job_id: Option<JobId>,
     pgid: Option<u32>,
     summary: String,
+    foreground_claimed: bool,
 }
 
 impl ExpandedRedirection {
@@ -98,6 +107,10 @@ pub type ExecutorFuture<'a> = Pin<Box<dyn Future<Output = ShellResult<ShellActio
 
 pub trait Executor<C>: Send + Sync {
     fn execute<'a>(&'a self, state: SharedShellState, command: &'a C) -> ExecutorFuture<'a>;
+}
+
+pub async fn initialize_interactive_shell() -> ShellResult<()> {
+    unix::initialize_interactive_shell().await
 }
 
 #[derive(Debug, Default)]
@@ -226,6 +239,7 @@ impl BootstrapExecutor {
                     job_id: None,
                     pgid: None,
                     summary: summarize_command(name, args),
+                    foreground_claimed: false,
                 };
                 let output = self
                     .execute_external_pipeline_segment(
@@ -249,6 +263,7 @@ impl BootstrapExecutor {
                     job_id: None,
                     pgid: None,
                     summary: summarize_command(name, args),
+                    foreground_claimed: false,
                 };
                 let output = self
                     .execute_external_pipeline_segment(
@@ -443,6 +458,7 @@ impl BootstrapExecutor {
             job_id: None,
             pgid: None,
             summary: summarize_pipeline(commands),
+            foreground_claimed: false,
         };
         let mut last_output = PipelineOutput {
             exit_code: ExitCode::SUCCESS,
@@ -450,27 +466,36 @@ impl BootstrapExecutor {
             stderr: Vec::new(),
         };
 
-        for command in commands {
-            last_output = self
-                .execute_pipeline_segment(
-                    state.clone(),
-                    command,
-                    stdin_buffer.take(),
-                    &mut job_context,
-                )
-                .await?;
-            state
-                .write()
-                .await
-                .set_last_exit_status(last_output.exit_code);
-            stdin_buffer = Some(last_output.stdout.clone());
+        let result = async {
+            for command in commands {
+                last_output = self
+                    .execute_pipeline_segment(
+                        state.clone(),
+                        command,
+                        stdin_buffer.take(),
+                        &mut job_context,
+                    )
+                    .await?;
+                state
+                    .write()
+                    .await
+                    .set_last_exit_status(last_output.exit_code);
+                stdin_buffer = Some(last_output.stdout.clone());
+            }
+
+            Ok(ShellAction::continue_with(CommandOutput {
+                exit_code: last_output.exit_code,
+                stdout: String::from_utf8_lossy(&last_output.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&last_output.stderr).into_owned(),
+            }))
+        }
+        .await;
+
+        if job_context.foreground_claimed {
+            let _ = unix::reclaim_terminal_for_shell();
         }
 
-        Ok(ShellAction::continue_with(CommandOutput {
-            exit_code: last_output.exit_code,
-            stdout: String::from_utf8_lossy(&last_output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&last_output.stderr).into_owned(),
-        }))
+        result
     }
 
     async fn execute_pipeline_segment(
@@ -655,7 +680,7 @@ impl BootstrapExecutor {
         command.current_dir(cwd);
         command.env_clear();
         command.envs(env_map);
-        configure_process_group(&mut command, None);
+        unix::configure_process_group(&mut command, job_context.pgid);
 
         if let Some(InputRedirection::File(path)) = &plan.stdin {
             match open_input_file(path) {
@@ -739,6 +764,12 @@ impl BootstrapExecutor {
         )
         .await;
 
+        if !job_context.foreground_claimed
+            && let Some(pgid) = job_context.pgid
+        {
+            job_context.foreground_claimed = unix::hand_terminal_to_foreground_job(pgid)?;
+        }
+
         let stdin_bytes = match (&plan.stdin, stdin_data) {
             (Some(InputRedirection::Inline(input)), _) => Some(input.clone()),
             (Some(InputRedirection::File(_)), _) => None,
@@ -751,26 +782,50 @@ impl BootstrapExecutor {
             stdin.write_all(&input).await?;
         }
 
-        let output = child.wait_with_output().await?;
+        let stdout_task = spawn_pipe_reader(child.stdout.take());
+        let stderr_task = spawn_pipe_reader(child.stderr.take());
+        let wait_status = unix::wait_for_foreground_process(child_pid).await?;
 
-        let code = output
-            .status
-            .code()
-            .and_then(|code| u8::try_from(code).ok())
-            .unwrap_or(1);
+        let (stdout, stderr) = match wait_status {
+            unix::ForegroundWaitStatus::Stopped(_) => {
+                abort_pipe_reader(stdout_task.as_ref());
+                abort_pipe_reader(stderr_task.as_ref());
+                (Vec::new(), Vec::new())
+            }
+            unix::ForegroundWaitStatus::Exited(_) | unix::ForegroundWaitStatus::Signaled(_) => {
+                let stdout = join_pipe_reader(stdout_task).await?;
+                let stderr = join_pipe_reader(stderr_task).await?;
+                (stdout, stderr)
+            }
+        };
+
+        let (process_state, exit_code) = process_state_from_wait_status(wait_status);
+
+        if job_context.foreground_claimed {
+            let _ = unix::reclaim_terminal_for_shell();
+            job_context.foreground_claimed = false;
+        }
+
+        if matches!(
+            wait_status,
+            unix::ForegroundWaitStatus::Exited(_) | unix::ForegroundWaitStatus::Signaled(_)
+        ) && job_context.pgid == Some(child_pid)
+        {
+            job_context.pgid = None;
+        }
 
         if let Some(job_id) = job_context.job_id {
             let _ = state.write().await.jobs_mut().update_process_state(
                 job_id,
                 child_pid,
-                ProcessState::Completed(i32::from(code)),
+                process_state,
             );
         }
 
         Ok(PipelineOutput {
-            exit_code: ExitCode::new(code),
-            stdout: output.stdout,
-            stderr: output.stderr,
+            exit_code,
+            stdout,
+            stderr,
         })
     }
 
@@ -873,7 +928,7 @@ async fn execute_external(
     command.current_dir(cwd);
     command.env_clear();
     command.envs(env_map);
-    configure_process_group(&mut command, None);
+    unix::configure_process_group(&mut command, None);
 
     if let Some(InputRedirection::File(path)) = &plan.stdin {
         match open_input_file(path) {
@@ -948,6 +1003,7 @@ async fn execute_external(
     let child_pid = child.id().unwrap_or_default();
     let job_id =
         register_foreground_job(state.clone(), child_pid, summarize_command(program, args)).await;
+    let foreground_claimed = unix::hand_terminal_to_foreground_job(child_pid)?;
 
     if let Some(InputRedirection::Inline(input)) = &plan.stdin
         && let Some(mut stdin) = child.stdin.take()
@@ -955,7 +1011,13 @@ async fn execute_external(
         stdin.write_all(input).await?;
     }
 
-    let status = match child.wait().await {
+    let wait_result = unix::wait_for_foreground_process(child_pid).await;
+
+    if foreground_claimed {
+        let _ = unix::reclaim_terminal_for_shell();
+    }
+
+    let wait_status = match wait_result {
         Ok(status) => status,
         Err(err) => {
             return Ok(ShellAction::continue_with(CommandOutput {
@@ -966,21 +1028,19 @@ async fn execute_external(
         }
     };
 
-    let code = status
-        .code()
-        .and_then(|code| u8::try_from(code).ok())
-        .unwrap_or(1);
+    let (process_state, exit_code) = process_state_from_wait_status(wait_status);
 
     if let Some(job_id) = job_id {
-        let _ = state.write().await.jobs_mut().update_process_state(
-            job_id,
-            child_pid,
-            ProcessState::Completed(i32::from(code)),
-        );
+        let _ =
+            state
+                .write()
+                .await
+                .jobs_mut()
+                .update_process_state(job_id, child_pid, process_state);
     }
 
     Ok(ShellAction::continue_with(CommandOutput {
-        exit_code: ExitCode::new(code),
+        exit_code,
         stdout: String::new(),
         stderr: String::new(),
     }))
@@ -1140,6 +1200,59 @@ fn merge_outputs(mut left: CommandOutput, right: CommandOutput) -> CommandOutput
     left
 }
 
+fn process_state_from_wait_status(status: unix::ForegroundWaitStatus) -> (ProcessState, ExitCode) {
+    match status {
+        unix::ForegroundWaitStatus::Exited(code) => {
+            let code = code.clamp(0, i32::from(u8::MAX)) as u8;
+            (
+                ProcessState::Completed(i32::from(code)),
+                ExitCode::new(code),
+            )
+        }
+        unix::ForegroundWaitStatus::Signaled(signal) => {
+            let code = signal_exit_code(signal);
+            (ProcessState::Completed(i32::from(code.as_u8())), code)
+        }
+        unix::ForegroundWaitStatus::Stopped(signal) => {
+            (ProcessState::Stopped, signal_exit_code(signal))
+        }
+    }
+}
+
+fn signal_exit_code(signal: i32) -> ExitCode {
+    let code = 128_i32.saturating_add(signal).clamp(1, i32::from(u8::MAX)) as u8;
+    ExitCode::new(code)
+}
+
+fn spawn_pipe_reader<T>(reader: Option<T>) -> Option<JoinHandle<io::Result<Vec<u8>>>>
+where
+    T: AsyncRead + Unpin + Send + 'static,
+{
+    reader.map(|mut reader| {
+        tokio::spawn(async move {
+            let mut buffer = Vec::new();
+            reader.read_to_end(&mut buffer).await?;
+            Ok(buffer)
+        })
+    })
+}
+
+fn abort_pipe_reader(handle: Option<&JoinHandle<io::Result<Vec<u8>>>>) {
+    if let Some(handle) = handle {
+        handle.abort();
+    }
+}
+
+async fn join_pipe_reader(handle: Option<JoinHandle<io::Result<Vec<u8>>>>) -> ShellResult<Vec<u8>> {
+    match handle {
+        Some(handle) => handle
+            .await
+            .map_err(|err| crate::shell::ShellError::message(format!("pipe reader failed: {err}")))?
+            .map_err(crate::shell::ShellError::from),
+        None => Ok(Vec::new()),
+    }
+}
+
 async fn register_foreground_job(
     state: SharedShellState,
     pid: u32,
@@ -1212,18 +1325,6 @@ fn summarize_pipeline(commands: &[CommandNode]) -> String {
         .collect::<Vec<_>>()
         .join(" | ")
 }
-
-#[cfg(unix)]
-fn configure_process_group(command: &mut Command, pgid: Option<u32>) {
-    let Ok(group) = i32::try_from(pgid.unwrap_or(0)) else {
-        return;
-    };
-
-    command.process_group(group);
-}
-
-#[cfg(not(unix))]
-fn configure_process_group(_command: &mut Command, _pgid: Option<u32>) {}
 
 async fn expand_simple_command(
     state: SharedShellState,
