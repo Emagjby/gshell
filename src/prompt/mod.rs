@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    collections::HashMap,
     future::Future,
     path::PathBuf,
     pin::Pin,
@@ -69,11 +70,20 @@ impl StarshipPromptRenderer {
         }
     }
 
-    async fn render_left_prompt(&self, cwd: PathBuf, status: u8) -> ShellResult<String> {
-        let output = Command::new(&self.binary)
-            .arg("prompt")
-            .arg(format!("--status={status}"))
-            .current_dir(cwd)
+    async fn render_left_prompt(
+        &self,
+        cwd: PathBuf,
+        status: u8,
+        env_map: HashMap<String, String>,
+    ) -> ShellResult<String> {
+        let mut command = Command::new(&self.binary);
+        command.arg("prompt");
+        command.arg(format!("--status={status}"));
+        command.current_dir(cwd);
+        command.env_clear();
+        command.envs(env_map);
+
+        let output = command
             .output()
             .await
             .map_err(|err| ShellError::message(format!("starship launch failed: {err}")))?;
@@ -104,12 +114,16 @@ impl StarshipPromptRenderer {
 impl PromptRenderer for StarshipPromptRenderer {
     fn render_frame<'a>(&'a self, state: SharedShellState) -> PromptFuture<'a> {
         Box::pin(async move {
-            let (cwd, status) = {
+            let (cwd, status, env_map) = {
                 let guard = state.read().await;
-                (guard.cwd().to_path_buf(), guard.last_exit_status().as_u8())
+                (
+                    guard.cwd().to_path_buf(),
+                    guard.last_exit_status().as_u8(),
+                    guard.env().clone(),
+                )
             };
 
-            let insert_prompt = self.render_left_prompt(cwd, status).await?;
+            let insert_prompt = self.render_left_prompt(cwd, status, env_map).await?;
 
             Ok(PromptFrame {
                 insert_prompt,

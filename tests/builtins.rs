@@ -250,3 +250,49 @@ async fn parsed_argv_reaches_echo_builtin_with_double_quotes() {
         ShellAction::Exit(_) => panic!("echo should not exit"),
     }
 }
+
+#[tokio::test]
+async fn assignment_only_command_updates_shell_environment() {
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser.parse("NAME=gencho").expect("parse should succeed");
+
+    let result = executor
+        .execute(state.clone(), &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(state.read().await.env_var("NAME"), Some("gencho"));
+        }
+        ShellAction::Exit(_) => panic!("assignment should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn assignment_prefix_is_visible_to_builtin_arguments() {
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse("NAME=gencho echo $NAME")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state.clone(), &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "gencho\n");
+        }
+        ShellAction::Exit(_) => panic!("echo should not exit"),
+    }
+}

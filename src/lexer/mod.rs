@@ -1,5 +1,7 @@
 use crate::{
+    ast::{CommandNode, ShellExpr, SimpleCommand},
     expand::{QuoteKind, Word, WordSegment},
+    parser::{ParsedCommand, Parser},
     shell::{ShellError, ShellResult},
 };
 
@@ -298,8 +300,8 @@ impl Lexer {
         match chars.peek().copied() {
             Some('(') => {
                 chars.next();
-                let source = self.read_command_substitution(chars)?;
-                segments.push(WordSegment::CommandSubstitution { source, quote });
+                let expr = self.read_command_substitution(chars)?;
+                segments.push(WordSegment::CommandSubstitution { expr, quote });
                 Ok(())
             }
             _ => self.read_variable(chars, segments, quote),
@@ -309,7 +311,7 @@ impl Lexer {
     fn read_command_substitution<I>(
         &self,
         chars: &mut std::iter::Peekable<I>,
-    ) -> ShellResult<String>
+    ) -> ShellResult<Box<ShellExpr>>
     where
         I: Iterator<Item = char>,
     {
@@ -347,7 +349,7 @@ impl Lexer {
                 ')' => {
                     depth -= 1;
                     if depth == 0 {
-                        return Ok(out);
+                        return parse_command_substitution_expr(&out);
                     }
                     out.push(ch);
                 }
@@ -425,4 +427,16 @@ fn is_var_start(c: char) -> bool {
 
 fn is_var_continue(c: char) -> bool {
     c == '_' || c.is_ascii_alphanumeric()
+}
+
+fn parse_command_substitution_expr(source: &str) -> ShellResult<Box<ShellExpr>> {
+    match Parser::default()
+        .parse(source)
+        .map_err(|err| ShellError::message(err.to_string()))?
+    {
+        ParsedCommand::Expr(expr) => Ok(Box::new(expr)),
+        ParsedCommand::Empty => Ok(Box::new(ShellExpr::Command(CommandNode::Simple(
+            SimpleCommand::new(Vec::new()),
+        )))),
+    }
 }

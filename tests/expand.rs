@@ -77,3 +77,28 @@ async fn double_quoted_variable_does_expand() {
     let guard = state.read().await;
     assert_eq!(word.expand(&guard), "gencho");
 }
+
+#[test]
+fn assignment_split_supports_quoted_suffix() {
+    let word = Word::new(vec![
+        WordSegment::Literal {
+            text: "NAME=".into(),
+            quote: QuoteKind::Unquoted,
+        },
+        WordSegment::Literal {
+            text: "hello world".into(),
+            quote: QuoteKind::DoubleQuoted,
+        },
+    ]);
+
+    assert_eq!(
+        word.split_assignment(),
+        Some((
+            "NAME".into(),
+            Word::new(vec![WordSegment::Literal {
+                text: "hello world".into(),
+                quote: QuoteKind::DoubleQuoted,
+            }])
+        ))
+    );
+}
