@@ -18,7 +18,9 @@ use tokio::{io::AsyncWriteExt, process::Command, sync::RwLock};
 use crate::{
     ast::{BoolOp, CommandNode, RedirectionKind, ShellExpr, SimpleCommand},
     builtins::BuiltinRegistry,
-    expand::{CommandSubstitutionExecutor, expand_words_with_state},
+    expand::{
+        CommandSubstitutionExecutor, expand_words_pathnames_with_state, expand_words_with_state,
+    },
     parser::ParsedCommand,
     shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
 };
@@ -938,7 +940,9 @@ async fn expand_simple_command(
         state.write().await.set_env_var(name.clone(), expanded);
     }
 
-    let argv = expand_words_with_state(state.clone(), &simple.argv, &substitution_executor).await?;
+    let argv =
+        expand_words_pathnames_with_state(state.clone(), &simple.argv, &substitution_executor)
+            .await?;
 
     let mut redirections = Vec::new();
     for redirection in &simple.redirections {
