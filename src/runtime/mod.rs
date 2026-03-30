@@ -158,6 +158,10 @@ impl BootstrapExecutor {
     ) -> ShellResult<ShellAction> {
         match node {
             CommandNode::Simple(simple) => self.execute_simple_command(state, simple, mode).await,
+            CommandNode::FunctionDef { name, body } => {
+                self.execute_function_definition(state, name, body, mode)
+                    .await
+            }
             CommandNode::Subshell(expr) => {
                 self.execute_subshell_placeholder(state, expr, mode).await
             }
@@ -187,6 +191,17 @@ impl BootstrapExecutor {
         };
 
         let registry = BuiltinRegistry::defaults();
+
+        let function = {
+            let guard = state.read().await;
+            guard.functions().get(name).cloned()
+        };
+
+        if let Some(function) = function {
+            return self
+                .execute_shell_function(state, name, &function, &expanded_redirections, mode)
+                .await;
+        }
 
         if let Some(builtin) = registry.get(name) {
             return self
@@ -232,6 +247,92 @@ impl BootstrapExecutor {
                     stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
                 }))
             }
+        }
+    }
+
+    async fn execute_function_definition(
+        &self,
+        state: SharedShellState,
+        name: &str,
+        body: &ShellExpr,
+        mode: ExecutionMode,
+    ) -> ShellResult<ShellAction> {
+        match mode {
+            ExecutionMode::Normal | ExecutionMode::Capture => {
+                state
+                    .write()
+                    .await
+                    .functions_mut()
+                    .set(name.to_string(), body.clone());
+            }
+            ExecutionMode::Pipeline => {
+                let isolated_state = clone_shell_state_for_pipeline(&state).await;
+                isolated_state
+                    .write()
+                    .await
+                    .functions_mut()
+                    .set(name.to_string(), body.clone());
+            }
+        }
+
+        Ok(ShellAction::continue_with(CommandOutput::success()))
+    }
+
+    async fn execute_shell_function(
+        &self,
+        state: SharedShellState,
+        name: &str,
+        body: &ShellExpr,
+        redirections: &[ExpandedRedirection],
+        mode: ExecutionMode,
+    ) -> ShellResult<ShellAction> {
+        let execution_state = match mode {
+            ExecutionMode::Pipeline => clone_shell_state_for_pipeline(&state).await,
+            ExecutionMode::Normal | ExecutionMode::Capture => state,
+        };
+
+        if !execution_state.read().await.can_enter_function(name) {
+            return Ok(ShellAction::continue_with(CommandOutput {
+                exit_code: ExitCode::FAILURE,
+                stdout: String::new(),
+                stderr: format!("function recursion detected: {name}\n"),
+            }));
+        }
+
+        execution_state
+            .write()
+            .await
+            .enter_function(name.to_string());
+        let result = self.execute_expr(execution_state.clone(), body, mode).await;
+        execution_state.write().await.exit_function();
+
+        let action = result?;
+
+        match action {
+            ShellAction::Continue(output) => {
+                let plan = match build_redirection_plan(redirections) {
+                    Ok(plan) => plan,
+                    Err(err) => {
+                        return Ok(ShellAction::continue_with(CommandOutput {
+                            exit_code: ExitCode::FAILURE,
+                            stdout: String::new(),
+                            stderr: format!("{err}\n"),
+                        }));
+                    }
+                };
+
+                let redirected = match apply_builtin_redirections(output, &plan) {
+                    Ok(output) => output,
+                    Err(err) => CommandOutput {
+                        exit_code: ExitCode::FAILURE,
+                        stdout: String::new(),
+                        stderr: format!("{err}\n"),
+                    },
+                };
+
+                Ok(ShellAction::continue_with(redirected))
+            }
+            ShellAction::Exit(code) => Ok(ShellAction::Exit(code)),
         }
     }
 
@@ -328,6 +429,10 @@ impl BootstrapExecutor {
             last_output = self
                 .execute_pipeline_segment(state.clone(), command, stdin_buffer.take())
                 .await?;
+            state
+                .write()
+                .await
+                .set_last_exit_status(last_output.exit_code);
             stdin_buffer = Some(last_output.stdout.clone());
         }
 
@@ -356,6 +461,36 @@ impl BootstrapExecutor {
                         stderr: Vec::new(),
                     });
                 };
+
+                let function = {
+                    let guard = state.read().await;
+                    guard.functions().get(name).cloned()
+                };
+
+                if let Some(function) = function {
+                    let action = self
+                        .execute_shell_function(
+                            state,
+                            name,
+                            &function,
+                            &expanded_redirections,
+                            ExecutionMode::Pipeline,
+                        )
+                        .await?;
+
+                    return Ok(match action {
+                        ShellAction::Continue(output) => PipelineOutput {
+                            exit_code: output.exit_code,
+                            stdout: output.stdout.into_bytes(),
+                            stderr: output.stderr.into_bytes(),
+                        },
+                        ShellAction::Exit(code) => PipelineOutput {
+                            exit_code: code,
+                            stdout: Vec::new(),
+                            stderr: Vec::new(),
+                        },
+                    });
+                }
 
                 let registry = BuiltinRegistry::defaults();
 
@@ -407,6 +542,24 @@ impl BootstrapExecutor {
                     stdin_data,
                 )
                 .await
+            }
+            CommandNode::FunctionDef { name, body } => {
+                let action = self
+                    .execute_function_definition(state, name, body, ExecutionMode::Pipeline)
+                    .await?;
+
+                Ok(match action {
+                    ShellAction::Continue(output) => PipelineOutput {
+                        exit_code: output.exit_code,
+                        stdout: output.stdout.into_bytes(),
+                        stderr: output.stderr.into_bytes(),
+                    },
+                    ShellAction::Exit(code) => PipelineOutput {
+                        exit_code: code,
+                        stdout: Vec::new(),
+                        stderr: Vec::new(),
+                    },
+                })
             }
             CommandNode::Subshell(expr) => {
                 let action = self
@@ -579,7 +732,10 @@ impl BootstrapExecutor {
     ) -> ShellResult<ShellAction> {
         let first_action = self.execute_expr(state.clone(), first, mode).await?;
         let mut aggregate = match first_action {
-            ShellAction::Continue(output) => output,
+            ShellAction::Continue(output) => {
+                state.write().await.set_last_exit_status(output.exit_code);
+                output
+            }
             ShellAction::Exit(code) => return Ok(ShellAction::Exit(code)),
         };
 
@@ -593,6 +749,7 @@ impl BootstrapExecutor {
                 let next_action = self.execute_expr(state.clone(), expr, mode).await?;
                 match next_action {
                     ShellAction::Continue(output) => {
+                        state.write().await.set_last_exit_status(output.exit_code);
                         aggregate = merge_outputs(aggregate, output);
                     }
                     ShellAction::Exit(code) => return Ok(ShellAction::Exit(code)),
@@ -616,6 +773,7 @@ impl BootstrapExecutor {
 
             match action {
                 ShellAction::Continue(output) => {
+                    state.write().await.set_last_exit_status(output.exit_code);
                     aggregate = merge_outputs(aggregate, output);
                 }
                 ShellAction::Exit(code) => return Ok(ShellAction::Exit(code)),

@@ -105,8 +105,8 @@ fn highlight_line(line: &str, palette: HighlighterPalette) -> StyledText {
             out.push((style, tok.to_string()));
 
             match tok {
-                "|" | "&&" | "||" | ";" | "(" => command_expected = true,
-                ")" => command_expected = false,
+                "|" | "&&" | "||" | ";" | "(" | "{" => command_expected = true,
+                ")" | "}" => command_expected = false,
                 _ => {}
             }
 
@@ -172,6 +172,9 @@ fn read_operator_token(line: &str, i: usize) -> Option<(&str, usize, OpKind)> {
     }
 
     if ch == '<' {
+        if peek_char(line, i + ch_len) == Some('<') {
+            return Some(("<<", i + ch_len + 1, OpKind::Redirect));
+        }
         return Some(("<", i + ch_len, OpKind::Redirect));
     }
 
@@ -183,8 +186,16 @@ fn read_operator_token(line: &str, i: usize) -> Option<(&str, usize, OpKind)> {
         return Some(("(", i + ch_len, OpKind::Control));
     }
 
+    if ch == '{' {
+        return Some(("{", i + ch_len, OpKind::Control));
+    }
+
     if ch == ')' {
         return Some((")", i + ch_len, OpKind::Control));
+    }
+
+    if ch == '}' {
+        return Some(("}", i + ch_len, OpKind::Control));
     }
 
     if ch.is_ascii_digit() {
@@ -283,7 +294,7 @@ fn read_word_end(line: &str, mut i: usize) -> usize {
 }
 
 fn is_operator_break(ch: char) -> bool {
-    matches!(ch, '|' | '&' | ';' | '(' | ')' | '<' | '>')
+    matches!(ch, '|' | '&' | ';' | '(' | ')' | '{' | '}' | '<' | '>')
 }
 
 fn is_flag_token(token: &str) -> bool {

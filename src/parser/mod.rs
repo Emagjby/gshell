@@ -257,6 +257,10 @@ fn parse_pipeline(cursor: &mut TokenCursor) -> ParseResult<ShellExpr> {
 }
 
 fn parse_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
+    if looks_like_function_definition(cursor) {
+        return parse_function_definition(cursor);
+    }
+
     match cursor.peek() {
         Some(Token::LParen) => parse_subshell(cursor),
         Some(Token::Word(_))
@@ -266,11 +270,76 @@ fn parse_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
         | Some(Token::RedirectOut)
         | Some(Token::RedirectAppend) => parse_simple_command(cursor),
         Some(Token::RParen) => Err(ParseError::invalid("unexpected ')'")),
+        Some(Token::LBrace | Token::RBrace) => Err(ParseError::invalid("unexpected brace")),
         Some(Token::Pipe | Token::AndIf | Token::OrIf | Token::Semicolon) => {
             Err(ParseError::invalid("expected command"))
         }
         None => Err(ParseError::incomplete("expected command")),
     }
+}
+
+fn looks_like_function_definition(cursor: &TokenCursor) -> bool {
+    matches!(
+        (
+            cursor.tokens.get(cursor.pos),
+            cursor.tokens.get(cursor.pos + 1),
+            cursor.tokens.get(cursor.pos + 2),
+            cursor.tokens.get(cursor.pos + 3),
+        ),
+        (
+            Some(Token::Word(word)),
+            Some(Token::LParen),
+            Some(Token::RParen),
+            Some(Token::LBrace),
+        ) if word.as_unquoted_literal().is_some()
+    )
+}
+
+fn parse_function_definition(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
+    let name = match cursor.next() {
+        Some(Token::Word(word)) => word
+            .as_unquoted_literal()
+            .ok_or_else(|| ParseError::invalid("function name must be unquoted"))?
+            .to_string(),
+        _ => return Err(ParseError::invalid("expected function name")),
+    };
+
+    match cursor.next() {
+        Some(Token::LParen) => {}
+        other => {
+            return Err(ParseError::invalid(format!(
+                "expected '(' after function name, found {:?}",
+                other
+            )));
+        }
+    }
+
+    match cursor.next() {
+        Some(Token::RParen) => {}
+        None => return Err(ParseError::incomplete("unclosed function signature")),
+        other => {
+            return Err(ParseError::invalid(format!(
+                "expected ')' after function name, found {:?}",
+                other
+            )));
+        }
+    }
+
+    match cursor.next() {
+        Some(Token::LBrace) => {}
+        None => return Err(ParseError::incomplete("function body missing '{'")),
+        other => {
+            return Err(ParseError::invalid(format!(
+                "expected '{{' to start function body, found {:?}",
+                other
+            )));
+        }
+    }
+
+    Ok(CommandNode::FunctionDef {
+        name,
+        body: Box::new(parse_brace_group(cursor)?),
+    })
 }
 
 fn parse_subshell(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
@@ -292,6 +361,40 @@ fn parse_subshell(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
             "expected ')' but found {:?}",
             other
         ))),
+    }
+}
+
+fn parse_brace_group(cursor: &mut TokenCursor) -> ParseResult<ShellExpr> {
+    if cursor.is_eof() {
+        return Err(ParseError::incomplete("unclosed function body"));
+    }
+
+    let mut exprs = Vec::new();
+
+    while !matches!(cursor.peek(), Some(Token::RBrace)) {
+        exprs.push(parse_boolean_chain(cursor)?);
+
+        if matches!(cursor.peek(), Some(Token::Semicolon)) {
+            cursor.next();
+        } else if cursor.is_eof() {
+            return Err(ParseError::incomplete("unclosed function body"));
+        } else if !matches!(cursor.peek(), Some(Token::RBrace)) {
+            return Err(ParseError::invalid("expected ';' or '}' in function body"));
+        }
+
+        if cursor.is_eof() {
+            return Err(ParseError::incomplete("unclosed function body"));
+        }
+    }
+
+    cursor.next();
+
+    if exprs.is_empty() {
+        Err(ParseError::invalid("function body cannot be empty"))
+    } else if exprs.len() == 1 {
+        Ok(exprs.remove(0))
+    } else {
+        Ok(ShellExpr::Sequence(exprs))
     }
 }
 
@@ -404,6 +507,7 @@ fn heredoc_count_node(node: &CommandNode) -> usize {
             .iter()
             .filter(|redir| matches!(redir.kind, RedirectionKind::HereDoc { .. }))
             .count(),
+        CommandNode::FunctionDef { body, .. } => heredoc_count_expr(body),
         CommandNode::Subshell(expr) => heredoc_count_expr(expr),
     }
 }
@@ -470,6 +574,7 @@ fn fill_node_heredocs(
 
             Ok(())
         }
+        CommandNode::FunctionDef { body, .. } => fill_expr_heredocs(body, cursor),
         CommandNode::Subshell(expr) => fill_expr_heredocs(expr, cursor),
     }
 }

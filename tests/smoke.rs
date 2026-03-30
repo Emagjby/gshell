@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
-use gshell::builtins::{Builtin, BuiltinFuture, BuiltinRegistry};
-use gshell::shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellState};
+use gshell::{
+    ast::{CommandNode, ShellExpr, SimpleCommand},
+    builtins::{Builtin, BuiltinFuture, BuiltinRegistry},
+    shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellState},
+};
 
 struct TestBuiltin;
 
@@ -56,6 +59,24 @@ fn alias_store_supports_set_get_remove_and_sorted_entries() {
 
     assert_eq!(state.aliases_mut().remove("a"), Some("echo a".to_string()));
     assert!(state.aliases().get("a").is_none());
+}
+
+#[test]
+fn function_store_supports_set_get_remove_and_sorted_names() {
+    let mut state = ShellState::new().expect("shell state should initialize");
+    let body = ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(Vec::new())));
+
+    state.functions_mut().set("z", body.clone());
+    state.functions_mut().set("a", body.clone());
+
+    assert!(state.functions().get("a").is_some());
+    assert_eq!(
+        state.functions().names(),
+        vec!["a".to_string(), "z".to_string()]
+    );
+
+    assert!(state.functions_mut().remove("a").is_some());
+    assert!(state.functions().get("a").is_none());
 }
 
 #[test]

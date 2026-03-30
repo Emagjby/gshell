@@ -219,6 +219,34 @@ async fn type_builtin_reports_alias() {
 }
 
 #[tokio::test]
+async fn type_builtin_reports_function() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let parser = Parser::default();
+    let defined = parser
+        .parse("greet() { echo hi; }")
+        .expect("parse should succeed");
+    let executor = BootstrapExecutor;
+    let _ = executor
+        .execute(state.clone(), &defined)
+        .await
+        .expect("function definition should succeed");
+    let builtin = TypeBuiltin;
+
+    let result = builtin
+        .execute(state, &["greet".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert!(output.stdout.contains("greet is a shell function"));
+        }
+        ShellAction::Exit(_) => panic!("type should not exit"),
+    }
+}
+
+#[tokio::test]
 async fn type_builtin_fails_for_unknown_command() {
     let state = ShellState::shared().await.expect("state should initialize");
     let builtin = TypeBuiltin;
