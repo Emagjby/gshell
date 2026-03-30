@@ -27,6 +27,7 @@ fn shell_state_initialization_defaults() {
     assert!(state.history().entries().is_empty());
     assert!(state.aliases().get("missing").is_none());
     assert!(state.functions().get("missing").is_none());
+    assert!(state.jobs().is_empty());
 }
 
 #[test]
