@@ -10,6 +10,7 @@ use crate::{
     ast::ShellExpr,
     config::{HighlighterConfig, PromptConfig},
     history::HistoryConfig,
+    jobs::Jobs,
     shell::ExitCode,
 };
 
@@ -141,6 +142,7 @@ pub struct ShellState {
     history: HistoryState,
     aliases: AliasStore,
     functions: FunctionStore,
+    jobs: Jobs,
     active_functions: Vec<String>,
     runtime_services: RuntimeServices,
 }
@@ -159,6 +161,7 @@ impl ShellState {
             history: HistoryState::new(history_path),
             aliases: AliasStore::default(),
             functions: FunctionStore::default(),
+            jobs: Jobs::default(),
             active_functions: Vec::new(),
             runtime_services: RuntimeServices::default(),
         })
@@ -222,6 +225,14 @@ impl ShellState {
 
     pub fn functions_mut(&mut self) -> &mut FunctionStore {
         &mut self.functions
+    }
+
+    pub fn jobs(&self) -> &Jobs {
+        &self.jobs
+    }
+
+    pub fn jobs_mut(&mut self) -> &mut Jobs {
+        &mut self.jobs
     }
 
     pub fn can_enter_function(&self, name: &str) -> bool {

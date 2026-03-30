@@ -22,6 +22,7 @@ use crate::{
         CommandSubstitutionExecutor, Word, expand_words_pathnames_with_state,
         expand_words_with_state,
     },
+    jobs::{JobDisposition, JobId, ProcessRecord, ProcessState},
     parser::{ParsedCommand, Parser},
     shell::{CommandOutput, ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
 };
@@ -74,6 +75,13 @@ struct ExpandedRedirection {
     fd: Option<u8>,
     kind: RedirectionKind,
     target: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PipelineJobContext {
+    job_id: Option<JobId>,
+    pgid: Option<u32>,
+    summary: String,
 }
 
 impl ExpandedRedirection {
@@ -214,6 +222,11 @@ impl BootstrapExecutor {
                 execute_external(state, name, args, &expanded_redirections).await
             }
             ExecutionMode::Capture => {
+                let mut job_context = PipelineJobContext {
+                    job_id: None,
+                    pgid: None,
+                    summary: summarize_command(name, args),
+                };
                 let output = self
                     .execute_external_pipeline_segment(
                         state,
@@ -221,6 +234,7 @@ impl BootstrapExecutor {
                         args,
                         &expanded_redirections,
                         None,
+                        &mut job_context,
                     )
                     .await?;
 
@@ -231,6 +245,11 @@ impl BootstrapExecutor {
                 }))
             }
             ExecutionMode::Pipeline => {
+                let mut job_context = PipelineJobContext {
+                    job_id: None,
+                    pgid: None,
+                    summary: summarize_command(name, args),
+                };
                 let output = self
                     .execute_external_pipeline_segment(
                         state,
@@ -238,6 +257,7 @@ impl BootstrapExecutor {
                         args,
                         &expanded_redirections,
                         None,
+                        &mut job_context,
                     )
                     .await?;
 
@@ -419,6 +439,11 @@ impl BootstrapExecutor {
         }
 
         let mut stdin_buffer: Option<Vec<u8>> = None;
+        let mut job_context = PipelineJobContext {
+            job_id: None,
+            pgid: None,
+            summary: summarize_pipeline(commands),
+        };
         let mut last_output = PipelineOutput {
             exit_code: ExitCode::SUCCESS,
             stdout: Vec::new(),
@@ -427,7 +452,12 @@ impl BootstrapExecutor {
 
         for command in commands {
             last_output = self
-                .execute_pipeline_segment(state.clone(), command, stdin_buffer.take())
+                .execute_pipeline_segment(
+                    state.clone(),
+                    command,
+                    stdin_buffer.take(),
+                    &mut job_context,
+                )
                 .await?;
             state
                 .write()
@@ -448,6 +478,7 @@ impl BootstrapExecutor {
         state: SharedShellState,
         node: &CommandNode,
         stdin_data: Option<Vec<u8>>,
+        job_context: &mut PipelineJobContext,
     ) -> ShellResult<PipelineOutput> {
         match node {
             CommandNode::Simple(simple) => {
@@ -540,6 +571,7 @@ impl BootstrapExecutor {
                     args,
                     &expanded_redirections,
                     stdin_data,
+                    job_context,
                 )
                 .await
             }
@@ -589,6 +621,7 @@ impl BootstrapExecutor {
         args: &[String],
         redirections: &[ExpandedRedirection],
         stdin_data: Option<Vec<u8>>,
+        job_context: &mut PipelineJobContext,
     ) -> ShellResult<PipelineOutput> {
         let (cwd, env_map) = {
             let guard = state.read().await;
@@ -622,6 +655,7 @@ impl BootstrapExecutor {
         command.current_dir(cwd);
         command.env_clear();
         command.envs(env_map);
+        configure_process_group(&mut command, None);
 
         if let Some(InputRedirection::File(path)) = &plan.stdin {
             match open_input_file(path) {
@@ -696,6 +730,15 @@ impl BootstrapExecutor {
             }
         };
 
+        let child_pid = child.id().unwrap_or_default();
+        register_pipeline_process(
+            state.clone(),
+            job_context,
+            child_pid,
+            summarize_command(program, args),
+        )
+        .await;
+
         let stdin_bytes = match (&plan.stdin, stdin_data) {
             (Some(InputRedirection::Inline(input)), _) => Some(input.clone()),
             (Some(InputRedirection::File(_)), _) => None,
@@ -715,6 +758,14 @@ impl BootstrapExecutor {
             .code()
             .and_then(|code| u8::try_from(code).ok())
             .unwrap_or(1);
+
+        if let Some(job_id) = job_context.job_id {
+            let _ = state.write().await.jobs_mut().update_process_state(
+                job_id,
+                child_pid,
+                ProcessState::Completed(i32::from(code)),
+            );
+        }
 
         Ok(PipelineOutput {
             exit_code: ExitCode::new(code),
@@ -822,6 +873,7 @@ async fn execute_external(
     command.current_dir(cwd);
     command.env_clear();
     command.envs(env_map);
+    configure_process_group(&mut command, None);
 
     if let Some(InputRedirection::File(path)) = &plan.stdin {
         match open_input_file(path) {
@@ -893,6 +945,10 @@ async fn execute_external(
         }
     };
 
+    let child_pid = child.id().unwrap_or_default();
+    let job_id =
+        register_foreground_job(state.clone(), child_pid, summarize_command(program, args)).await;
+
     if let Some(InputRedirection::Inline(input)) = &plan.stdin
         && let Some(mut stdin) = child.stdin.take()
     {
@@ -914,6 +970,14 @@ async fn execute_external(
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .unwrap_or(1);
+
+    if let Some(job_id) = job_id {
+        let _ = state.write().await.jobs_mut().update_process_state(
+            job_id,
+            child_pid,
+            ProcessState::Completed(i32::from(code)),
+        );
+    }
 
     Ok(ShellAction::continue_with(CommandOutput {
         exit_code: ExitCode::new(code),
@@ -1075,6 +1139,91 @@ fn merge_outputs(mut left: CommandOutput, right: CommandOutput) -> CommandOutput
     left.exit_code = right.exit_code;
     left
 }
+
+async fn register_foreground_job(
+    state: SharedShellState,
+    pid: u32,
+    summary: String,
+) -> Option<JobId> {
+    if pid == 0 {
+        return None;
+    }
+
+    let job_id = state.write().await.jobs_mut().insert(
+        pid,
+        summary.clone(),
+        JobDisposition::Foreground,
+        vec![ProcessRecord::new(pid, summary)],
+    );
+
+    Some(job_id)
+}
+
+async fn register_pipeline_process(
+    state: SharedShellState,
+    context: &mut PipelineJobContext,
+    pid: u32,
+    summary: String,
+) {
+    if pid == 0 {
+        return;
+    }
+
+    let pgid = context.pgid.unwrap_or(pid);
+    context.pgid = Some(pgid);
+
+    let mut guard = state.write().await;
+    if let Some(job_id) = context.job_id {
+        let _ = guard
+            .jobs_mut()
+            .add_process(job_id, ProcessRecord::new(pid, summary));
+    } else {
+        let job_id = guard.jobs_mut().insert(
+            pgid,
+            context.summary.clone(),
+            JobDisposition::Foreground,
+            vec![ProcessRecord::new(pid, summary)],
+        );
+        context.job_id = Some(job_id);
+    }
+}
+
+fn summarize_command(program: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        program.to_string()
+    } else {
+        format!("{} {}", program, args.join(" "))
+    }
+}
+
+fn summarize_pipeline(commands: &[CommandNode]) -> String {
+    commands
+        .iter()
+        .map(|node| match node {
+            CommandNode::Simple(simple) => simple
+                .argv
+                .iter()
+                .map(Word::quote_removed_text)
+                .collect::<Vec<_>>()
+                .join(" "),
+            CommandNode::FunctionDef { name, .. } => format!("{name}()"),
+            CommandNode::Subshell(_) => "(subshell)".to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+#[cfg(unix)]
+fn configure_process_group(command: &mut Command, pgid: Option<u32>) {
+    let Ok(group) = i32::try_from(pgid.unwrap_or(0)) else {
+        return;
+    };
+
+    command.process_group(group);
+}
+
+#[cfg(not(unix))]
+fn configure_process_group(_command: &mut Command, _pgid: Option<u32>) {}
 
 async fn expand_simple_command(
     state: SharedShellState,
