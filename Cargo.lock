@@ -398,6 +398,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "expectrl",
+ "nu-ansi-term",
  "reedline",
  "tempfile",
  "tokio",

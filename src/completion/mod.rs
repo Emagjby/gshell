@@ -9,6 +9,7 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+use nu_ansi_term::Style;
 use reedline::{Completer, Hinter, SearchQuery, Span, Suggestion};
 
 use crate::{
@@ -60,7 +61,7 @@ impl Completer for ShellCompleter {
                 style: None,
                 extra: None,
                 span: context.span,
-                append_whitespace: true,
+                append_whitespace: context.kind != CompletionKind::Path,
                 match_indices: None,
             })
             .collect()
@@ -214,9 +215,26 @@ impl ShellCompleter {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct ShellHinter {
+    style: Style,
     current_hint: String,
+}
+
+impl Default for ShellHinter {
+    fn default() -> Self {
+        Self {
+            style: Style::new(),
+            current_hint: String::new(),
+        }
+    }
+}
+
+impl ShellHinter {
+    pub fn with_style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
+    }
 }
 
 impl Hinter for ShellHinter {
@@ -225,7 +243,7 @@ impl Hinter for ShellHinter {
         line: &str,
         pos: usize,
         history: &dyn reedline::History,
-        _use_ansi: bool,
+        use_ansi: bool,
         _cwd: &str,
     ) -> String {
         if pos != line.len() || line.trim().is_empty() {
@@ -254,7 +272,11 @@ impl Hinter for ShellHinter {
             .unwrap_or_default();
 
         self.current_hint = hint.clone();
-        hint
+        if use_ansi && !hint.is_empty() {
+            self.style.paint(hint).to_string()
+        } else {
+            hint
+        }
     }
 
     fn complete_hint(&self) -> String {

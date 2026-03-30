@@ -1,11 +1,13 @@
+pub mod highlighter;
 pub mod validator;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
+use nu_ansi_term::Style;
 use reedline::{
-    ColumnarMenu, EditCommand, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Reedline,
-    ReedlineEvent, ReedlineMenu, Signal, Vi, default_vi_insert_keybindings,
-    default_vi_normal_keybindings,
+    ColumnarMenu, Completer, EditCommand, Editor, FileBackedHistory, KeyCode, KeyModifiers, Menu,
+    MenuBuilder, MenuEvent, Painter, Reedline, ReedlineEvent, ReedlineMenu, Signal, Suggestion, Vi,
+    default_vi_insert_keybindings, default_vi_normal_keybindings,
 };
 
 use crate::{
@@ -15,12 +17,113 @@ use crate::{
     prompt::{ConfiguredPromptRenderer, ReedlinePromptAdapter},
     runtime::Executor,
     shell::{ExitCode, SharedShellState, ShellAction, ShellError, ShellResult},
-    ui::validator::ParserValidator,
+    ui::{
+        highlighter::{HighlighterPalette, ShellHighlighter},
+        validator::ParserValidator,
+    },
 };
 
 pub struct Repl<E> {
     line_editor: Reedline,
     core: ReplCore<E>,
+    menu_prompt: Arc<RwLock<String>>,
+}
+
+struct PromptAwareColumnarMenu {
+    inner: ColumnarMenu,
+    prompt: Arc<RwLock<String>>,
+    indicator: String,
+}
+
+impl PromptAwareColumnarMenu {
+    fn new(inner: ColumnarMenu, prompt: Arc<RwLock<String>>) -> Self {
+        Self {
+            inner,
+            prompt,
+            indicator: String::new(),
+        }
+    }
+
+    fn refresh_indicator(&mut self) {
+        let prompt = self
+            .prompt
+            .read()
+            .expect("menu prompt lock should not be poisoned");
+        self.indicator = format!("{prompt}| ");
+    }
+}
+
+impl Menu for PromptAwareColumnarMenu {
+    fn settings(&self) -> &reedline::MenuSettings {
+        self.inner.settings()
+    }
+
+    fn indicator(&self) -> &str {
+        &self.indicator
+    }
+
+    fn is_active(&self) -> bool {
+        self.inner.is_active()
+    }
+
+    fn menu_event(&mut self, event: MenuEvent) {
+        if matches!(event, MenuEvent::Activate(_) | MenuEvent::Edit(_)) {
+            self.refresh_indicator();
+        }
+        self.inner.menu_event(event);
+    }
+
+    fn can_quick_complete(&self) -> bool {
+        self.inner.can_quick_complete()
+    }
+
+    fn can_partially_complete(
+        &mut self,
+        values_updated: bool,
+        editor: &mut Editor,
+        completer: &mut dyn Completer,
+    ) -> bool {
+        self.inner
+            .can_partially_complete(values_updated, editor, completer)
+    }
+
+    fn update_values(&mut self, editor: &mut Editor, completer: &mut dyn Completer) {
+        self.inner.update_values(editor, completer);
+    }
+
+    fn update_working_details(
+        &mut self,
+        editor: &mut Editor,
+        completer: &mut dyn Completer,
+        painter: &Painter,
+    ) {
+        self.inner
+            .update_working_details(editor, completer, painter);
+    }
+
+    fn replace_in_buffer(&self, editor: &mut Editor) {
+        self.inner.replace_in_buffer(editor);
+    }
+
+    fn menu_required_lines(&self, terminal_columns: u16) -> u16 {
+        self.inner.menu_required_lines(terminal_columns)
+    }
+
+    fn menu_string(&self, available_lines: u16, use_ansi_coloring: bool) -> String {
+        self.inner.menu_string(available_lines, use_ansi_coloring)
+    }
+
+    fn min_rows(&self) -> u16 {
+        self.inner.min_rows()
+    }
+
+    fn get_values(&self) -> &[Suggestion] {
+        self.inner.get_values()
+    }
+
+    fn set_cursor_pos(&mut self, cursor_pos: (u16, u16)) {
+        self.inner.set_cursor_pos(cursor_pos);
+    }
 }
 
 pub struct ReplCore<E> {
@@ -39,12 +142,35 @@ where
     E: Executor<ParsedCommand>,
 {
     pub async fn new(executor: E, state: SharedShellState) -> Self {
+        let menu_prompt = Arc::new(RwLock::new(String::new()));
         let history = build_history(state.clone()).await;
+        let highlighter_palette = {
+            let guard = state.read().await;
+            let config = guard.runtime_services().highlighter_config();
+            HighlighterPalette::new(
+                config.command_color(),
+                config.builtin_color(),
+                config.argument_color(),
+                config.flag_color(),
+                config.operator_color(),
+                config.redirect_color(),
+            )
+        };
+        let hint_style = {
+            let guard = state.read().await;
+            let config = guard.runtime_services().highlighter_config();
+            Style::new().fg(config.hint_color())
+        };
 
         let completer = Box::new(ShellCompleter::new(state.clone()));
-        let hinter = Box::new(ShellHinter::default());
+        let hinter = Box::new(ShellHinter::default().with_style(hint_style));
 
-        let completion_menu = Box::new(ColumnarMenu::default().with_name("completion_menu"));
+        let completion_menu = Box::new(PromptAwareColumnarMenu::new(
+            ColumnarMenu::default()
+                .with_name("completion_menu")
+                .with_text_style(Style::new()),
+            menu_prompt.clone(),
+        ));
 
         let mut insert_keybindings = default_vi_insert_keybindings();
         let normal_keybindings = default_vi_normal_keybindings();
@@ -69,6 +195,7 @@ where
             KeyCode::Right,
             ReedlineEvent::UntilFound(vec![
                 ReedlineEvent::HistoryHintComplete,
+                ReedlineEvent::MenuRight,
                 ReedlineEvent::Edit(vec![EditCommand::MoveRight { select: false }]),
             ]),
         );
@@ -80,7 +207,8 @@ where
             .with_completer(completer)
             .with_hinter(hinter)
             .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
-            .with_edit_mode(edit_mode);
+            .with_edit_mode(edit_mode)
+            .with_highlighter(Box::new(ShellHighlighter::new(highlighter_palette)));
 
         let line_editor = match history {
             Ok(history) => base_editor.with_history(Box::new(history)),
@@ -93,12 +221,14 @@ where
         Self {
             line_editor,
             core: ReplCore::new(executor),
+            menu_prompt,
         }
     }
 
     pub async fn run(&mut self, state: SharedShellState) -> ShellResult<()> {
         let renderer = Arc::new(ConfiguredPromptRenderer::new());
-        let mut prompt = ReedlinePromptAdapter::new(renderer);
+        let mut prompt =
+            ReedlinePromptAdapter::with_menu_prompt(renderer, self.menu_prompt.clone());
 
         loop {
             prompt.refresh(state.clone()).await;
