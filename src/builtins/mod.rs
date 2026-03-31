@@ -15,7 +15,7 @@ pub use clear::ClearBuiltin;
 pub use echo::EchoBuiltin;
 pub use exit::ExitBuiltin;
 pub use history::HistoryBuiltin;
-pub use jobs::{BgBuiltin, FgBuiltin, JobsBuiltin};
+pub use jobs::{BgBuiltin, FgBuiltin, JobsBuiltin, KillBuiltin};
 pub use pwd::PwdBuiltin;
 pub use r#type::TypeBuiltin;
 pub use unalias::UnaliasBuiltin;
@@ -58,6 +58,7 @@ impl BuiltinRegistry {
         registry.register(Arc::new(JobsBuiltin));
         registry.register(Arc::new(FgBuiltin));
         registry.register(Arc::new(BgBuiltin));
+        registry.register(Arc::new(KillBuiltin));
         registry.register(Arc::new(CdBuiltin));
         registry.register(Arc::new(PwdBuiltin));
         registry.register(Arc::new(EchoBuiltin));

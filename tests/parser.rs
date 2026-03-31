@@ -35,6 +35,23 @@ fn operator_tokenization_works() {
 }
 
 #[test]
+fn trailing_background_tokenization_works() {
+    let lexer = Lexer;
+    let tokens = lexer
+        .tokenize("sleep 1 &")
+        .expect("tokenization should succeed");
+
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Word(lit("sleep")),
+            Token::Word(lit("1")),
+            Token::Ampersand,
+        ]
+    );
+}
+
+#[test]
 fn redirect_tokenization_works() {
     let lexer = Lexer;
     let tokens = lexer
@@ -242,6 +259,19 @@ fn parses_function_definition_ast() {
                 vec![lit("echo"), lit("hi"),]
             )))),
         }))
+    );
+}
+
+#[test]
+fn parses_trailing_background_ast() {
+    let parser = Parser::default();
+    let parsed = parser.parse("sleep 1 &").expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Background(ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(
+            vec![lit("sleep"), lit("1")]
+        ))))
     );
 }
 

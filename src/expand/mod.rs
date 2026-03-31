@@ -153,8 +153,18 @@ pub fn exit_code_to_string(code: ExitCode) -> String {
 fn expand_word_sync(state: &ShellState, word: &Word) -> String {
     let mut out = String::new();
 
-    for segment in &word.segments {
+    for (idx, segment) in word.segments.iter().enumerate() {
         match segment {
+            WordSegment::Literal {
+                text,
+                quote: QuoteKind::Unquoted,
+            } if idx == 0 => {
+                if let Some(expanded) = expand_leading_tilde(text, state.env_var("HOME")) {
+                    out.push_str(&expanded);
+                } else {
+                    out.push_str(text);
+                }
+            }
             WordSegment::Literal { text, .. } => out.push_str(text),
             WordSegment::Variable { name, quote } => {
                 if matches!(quote, QuoteKind::SingleQuoted) {
@@ -191,8 +201,23 @@ pub async fn expand_word_with_state(
 ) -> ShellResult<String> {
     let mut out = String::new();
 
-    for segment in &word.segments {
+    for (idx, segment) in word.segments.iter().enumerate() {
         match segment {
+            WordSegment::Literal {
+                text,
+                quote: QuoteKind::Unquoted,
+            } if idx == 0 => {
+                let home = {
+                    let guard = state.read().await;
+                    guard.env_var("HOME").map(ToOwned::to_owned)
+                };
+
+                if let Some(expanded) = expand_leading_tilde(text, home.as_deref()) {
+                    out.push_str(&expanded);
+                } else {
+                    out.push_str(text);
+                }
+            }
             WordSegment::Literal { text, .. } => out.push_str(text),
             WordSegment::Variable { name, quote } => {
                 if matches!(quote, QuoteKind::SingleQuoted) {
@@ -292,6 +317,15 @@ fn normalize_command_substitution_output(mut output: String) -> String {
     }
 
     output
+}
+
+fn expand_leading_tilde(text: &str, home: Option<&str>) -> Option<String> {
+    if text == "~" {
+        return home.map(ToOwned::to_owned);
+    }
+
+    text.strip_prefix("~/")
+        .and_then(|suffix| home.map(|home| format!("{home}/{suffix}")))
 }
 
 fn is_valid_assignment_name(name: &str) -> bool {
@@ -408,9 +442,20 @@ async fn expand_word_pattern_with_state(
     let mut tokens = Vec::new();
     let mut has_glob_meta = false;
 
-    for segment in &word.segments {
+    for (idx, segment) in word.segments.iter().enumerate() {
         let quote = segment.quote_kind();
         let segment_text = match segment {
+            WordSegment::Literal {
+                text,
+                quote: QuoteKind::Unquoted,
+            } if idx == 0 => {
+                let home = {
+                    let guard = state.read().await;
+                    guard.env_var("HOME").map(ToOwned::to_owned)
+                };
+
+                expand_leading_tilde(text, home.as_deref()).unwrap_or_else(|| text.clone())
+            }
             WordSegment::Literal { text, .. } => text.clone(),
             WordSegment::Variable { name, .. } => {
                 let guard = state.read().await;

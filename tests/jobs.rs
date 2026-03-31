@@ -11,6 +11,110 @@ use nix::{
     unistd::Pid,
 };
 
+#[cfg(unix)]
+#[tokio::test]
+async fn trailing_ampersand_starts_external_command_in_background() {
+    use std::time::Duration;
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser.parse("sleep 1 &").expect("parse should succeed");
+    let result = executor
+        .execute(state.clone(), &parsed)
+        .await
+        .expect("execution should succeed");
+
+    let job = {
+        let guard = state.read().await;
+        let jobs = guard.jobs().iter().collect::<Vec<_>>();
+        assert_eq!(jobs.len(), 1);
+        jobs[0].clone()
+    };
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, format!("[{}] {}\n", job.id(), job.summary()));
+        }
+        ShellAction::Exit(_) => panic!("background command should not exit the shell"),
+    }
+
+    assert_eq!(job.state(), JobState::Running);
+
+    kill(Pid::from_raw(job.pgid() as i32), Signal::SIGKILL).expect("SIGKILL should be delivered");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    gshell::runtime::refresh_job_statuses(state.clone())
+        .await
+        .expect("job refresh should succeed");
+
+    let guard = state.read().await;
+    assert_eq!(
+        guard
+            .jobs()
+            .get(job.id())
+            .expect("job should exist")
+            .state(),
+        JobState::Completed
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn trailing_ampersand_starts_pipeline_in_background() {
+    use std::time::Duration;
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse("sleep 1 | cat &")
+        .expect("parse should succeed");
+    let result = executor
+        .execute(state.clone(), &parsed)
+        .await
+        .expect("execution should succeed");
+
+    let (job_id, pgid, summary, process_count, job_state) = {
+        let guard = state.read().await;
+        let jobs = guard.jobs().iter().collect::<Vec<_>>();
+        assert_eq!(jobs.len(), 1);
+        let job = jobs[0];
+        (
+            job.id(),
+            job.pgid(),
+            job.summary().to_string(),
+            job.processes().len(),
+            job.state(),
+        )
+    };
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, format!("[{job_id}] {summary}\n"));
+        }
+        ShellAction::Exit(_) => panic!("background pipeline should not exit the shell"),
+    }
+
+    assert_eq!(process_count, 2);
+    assert_eq!(job_state, JobState::Running);
+
+    kill(Pid::from_raw(pgid as i32), Signal::SIGKILL).expect("SIGKILL should be delivered");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    gshell::runtime::refresh_job_statuses(state.clone())
+        .await
+        .expect("job refresh should succeed");
+
+    let guard = state.read().await;
+    assert_eq!(
+        guard.jobs().get(job_id).expect("job should exist").state(),
+        JobState::Completed
+    );
+}
+
 #[tokio::test]
 async fn external_command_creates_completed_foreground_job_record() {
     let parser = Parser::default();

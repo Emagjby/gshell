@@ -9,6 +9,7 @@ use crate::{
 pub enum Token {
     Word(Word),
     Pipe,
+    Ampersand,
     AndIf,
     OrIf,
     Semicolon,
@@ -53,7 +54,7 @@ impl Lexer {
                         chars.next();
                         tokens.push(Token::AndIf);
                     } else {
-                        return Err(ShellError::message("unsupported operator '&'"));
+                        tokens.push(Token::Ampersand);
                     }
                 }
                 ';' => {
@@ -450,7 +451,7 @@ fn parse_command_substitution_expr(source: &str) -> ShellResult<Box<ShellExpr>> 
         .parse(source)
         .map_err(|err| ShellError::message(err.to_string()))?
     {
-        ParsedCommand::Expr(expr) => Ok(Box::new(expr)),
+        ParsedCommand::Expr(expr) | ParsedCommand::Background(expr) => Ok(Box::new(expr)),
         ParsedCommand::Empty => Ok(Box::new(ShellExpr::Command(CommandNode::Simple(
             SimpleCommand::new(Vec::new()),
         )))),

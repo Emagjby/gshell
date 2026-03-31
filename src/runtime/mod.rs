@@ -88,11 +88,27 @@ struct ExpandedRedirection {
 }
 
 #[derive(Debug, Clone)]
+struct PreparedSimpleCommand {
+    argv: Vec<String>,
+    redirections: Vec<ExpandedRedirection>,
+    assignment_env: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExternalInvocation<'a> {
+    program: &'a str,
+    args: &'a [String],
+    redirections: &'a [ExpandedRedirection],
+    assignment_env: &'a [(String, String)],
+}
+
+#[derive(Debug, Clone)]
 struct PipelineJobContext {
     job_id: Option<JobId>,
     pgid: Option<u32>,
     summary: String,
     foreground_claimed: bool,
+    background: bool,
 }
 
 impl ExpandedRedirection {
@@ -127,7 +143,27 @@ pub async fn refresh_job_statuses(state: SharedShellState) -> ShellResult<()> {
         };
 
         let mut child = child_handle.lock().await;
-        let Some(exit_status) = child.try_wait()? else {
+        let echild = 10;
+        let (exit_status, missing_child) = match child.try_wait() {
+            Ok(Some(exit_status)) => (Some(exit_status), false),
+            Ok(None) => (None, false),
+            Err(err) if err.raw_os_error() == Some(echild) => (None, true),
+            Err(err) => return Err(err.into()),
+        };
+
+        let Some(exit_status) = exit_status else {
+            if missing_child && state.read().await.jobs().job_id_for_pid(pid).is_some() {
+                drop(child);
+                let _ = child_handles.remove(pid).await;
+                let mut guard = state.write().await;
+                if let Some(job_id) = guard.jobs().job_id_for_pid(pid) {
+                    let _ = guard.jobs_mut().update_process_state(
+                        job_id,
+                        pid,
+                        ProcessState::Completed(1),
+                    );
+                }
+            }
             continue;
         };
         drop(child);
@@ -286,6 +322,14 @@ pub async fn continue_job_in_foreground(
     }))
 }
 
+pub fn signal_job_process_group(pgid: u32, signal: i32) -> ShellResult<()> {
+    unix::signal_process_group(pgid, signal)
+}
+
+pub fn signal_process(pid: u32, signal: i32) -> ShellResult<()> {
+    unix::signal_process(pid, signal)
+}
+
 #[derive(Debug, Default)]
 pub struct BootstrapExecutor;
 
@@ -301,6 +345,7 @@ impl Executor<ParsedCommand> for BootstrapExecutor {
                 ParsedCommand::Expr(expr) => {
                     self.execute_expr(state, expr, ExecutionMode::Normal).await
                 }
+                ParsedCommand::Background(expr) => self.execute_background_expr(state, expr).await,
             }
         })
     }
@@ -344,6 +389,138 @@ impl BootstrapExecutor {
         }
     }
 
+    async fn execute_background_expr(
+        &self,
+        state: SharedShellState,
+        expr: &ShellExpr,
+    ) -> ShellResult<ShellAction> {
+        match expr {
+            ShellExpr::Command(CommandNode::Simple(simple)) => {
+                let prepared = expand_simple_command(state.clone(), simple).await?;
+                let expanded_argv = prepared.argv;
+                let expanded_redirections = prepared.redirections;
+
+                let Some((name, args)) = expanded_argv.split_first() else {
+                    return Ok(ShellAction::continue_with(CommandOutput::success()));
+                };
+
+                let registry = BuiltinRegistry::defaults();
+
+                let function = {
+                    let guard = state.read().await;
+                    guard.functions().get(name).cloned()
+                };
+
+                if function.is_some() || registry.get(name).is_some() {
+                    return Ok(ShellAction::continue_with(CommandOutput::failure(
+                        ExitCode::FAILURE,
+                        "background execution currently supports external commands only\n",
+                    )));
+                }
+
+                execute_external_background(
+                    state,
+                    ExternalInvocation {
+                        program: name,
+                        args,
+                        redirections: &expanded_redirections,
+                        assignment_env: &prepared.assignment_env,
+                    },
+                )
+                .await
+            }
+            ShellExpr::Pipeline(commands) => {
+                self.execute_pipeline_background(state, commands).await
+            }
+            _ => Ok(ShellAction::continue_with(CommandOutput::failure(
+                ExitCode::FAILURE,
+                "background execution currently supports external commands only\n",
+            ))),
+        }
+    }
+
+    async fn execute_pipeline_background(
+        &self,
+        state: SharedShellState,
+        commands: &[CommandNode],
+    ) -> ShellResult<ShellAction> {
+        if commands.is_empty() {
+            return Ok(ShellAction::continue_with(CommandOutput::success()));
+        }
+
+        if commands
+            .iter()
+            .any(|node| !matches!(node, CommandNode::Simple(_)))
+        {
+            return Ok(ShellAction::continue_with(CommandOutput::failure(
+                ExitCode::FAILURE,
+                "background execution currently supports external commands only\n",
+            )));
+        }
+
+        let mut stdin_buffer: Option<Vec<u8>> = None;
+        let mut job_context = PipelineJobContext {
+            job_id: None,
+            pgid: None,
+            summary: summarize_pipeline(commands),
+            foreground_claimed: false,
+            background: true,
+        };
+
+        for command in commands {
+            match command {
+                CommandNode::Simple(simple) => {
+                    let prepared = expand_simple_command(state.clone(), simple).await?;
+                    let expanded_argv = prepared.argv;
+                    let expanded_redirections = prepared.redirections;
+
+                    let Some((name, args)) = expanded_argv.split_first() else {
+                        stdin_buffer = Some(Vec::new());
+                        continue;
+                    };
+
+                    let registry = BuiltinRegistry::defaults();
+                    let function = {
+                        let guard = state.read().await;
+                        guard.functions().get(name).cloned()
+                    };
+
+                    if function.is_some() || registry.get(name).is_some() {
+                        return Ok(ShellAction::continue_with(CommandOutput::failure(
+                            ExitCode::FAILURE,
+                            "background execution currently supports external commands only\n",
+                        )));
+                    }
+
+                    let output = self
+                        .execute_external_pipeline_segment(
+                            state.clone(),
+                            ExternalInvocation {
+                                program: name,
+                                args,
+                                redirections: &expanded_redirections,
+                                assignment_env: &prepared.assignment_env,
+                            },
+                            stdin_buffer.take(),
+                            &mut job_context,
+                        )
+                        .await?;
+                    stdin_buffer = Some(output.stdout);
+                }
+                CommandNode::FunctionDef { .. } | CommandNode::Subshell(_) => unreachable!(),
+            }
+        }
+
+        Ok(ShellAction::continue_with(CommandOutput {
+            exit_code: ExitCode::SUCCESS,
+            stdout: job_context
+                .job_id
+                .map(|job_id| format!("[{job_id}] {}\n", job_context.summary))
+                .unwrap_or_default(),
+            stderr: String::new(),
+        }))
+    }
+
     async fn execute_command_node(
         &self,
         state: SharedShellState,
@@ -377,8 +554,9 @@ impl BootstrapExecutor {
         simple: &SimpleCommand,
         mode: ExecutionMode,
     ) -> ShellResult<ShellAction> {
-        let (expanded_argv, expanded_redirections) =
-            expand_simple_command(state.clone(), simple).await?;
+        let prepared = expand_simple_command(state.clone(), simple).await?;
+        let expanded_argv = prepared.argv;
+        let expanded_redirections = prepared.redirections;
 
         let Some((name, args)) = expanded_argv.split_first() else {
             return Ok(ShellAction::continue_with(CommandOutput::success()));
@@ -391,21 +569,42 @@ impl BootstrapExecutor {
             guard.functions().get(name).cloned()
         };
 
+        let command_state = if prepared.assignment_env.is_empty() {
+            state.clone()
+        } else {
+            state_with_env_overrides(&state, &prepared.assignment_env).await
+        };
+
         if let Some(function) = function {
             return self
-                .execute_shell_function(state, name, &function, &expanded_redirections, mode)
+                .execute_shell_function(
+                    command_state,
+                    name,
+                    &function,
+                    &expanded_redirections,
+                    mode,
+                )
                 .await;
         }
 
         if let Some(builtin) = registry.get(name) {
             return self
-                .execute_builtin_simple(state, builtin, args, &expanded_redirections, mode)
+                .execute_builtin_simple(command_state, builtin, args, &expanded_redirections, mode)
                 .await;
         }
 
         match mode {
             ExecutionMode::Normal => {
-                execute_external(state, name, args, &expanded_redirections).await
+                execute_external(
+                    state,
+                    ExternalInvocation {
+                        program: name,
+                        args,
+                        redirections: &expanded_redirections,
+                        assignment_env: &prepared.assignment_env,
+                    },
+                )
+                .await
             }
             ExecutionMode::Capture => {
                 let mut job_context = PipelineJobContext {
@@ -413,13 +612,17 @@ impl BootstrapExecutor {
                     pgid: None,
                     summary: summarize_command(name, args),
                     foreground_claimed: false,
+                    background: false,
                 };
                 let output = self
                     .execute_external_pipeline_segment(
                         state,
-                        name,
-                        args,
-                        &expanded_redirections,
+                        ExternalInvocation {
+                            program: name,
+                            args,
+                            redirections: &expanded_redirections,
+                            assignment_env: &prepared.assignment_env,
+                        },
                         None,
                         &mut job_context,
                     )
@@ -437,13 +640,17 @@ impl BootstrapExecutor {
                     pgid: None,
                     summary: summarize_command(name, args),
                     foreground_claimed: false,
+                    background: false,
                 };
                 let output = self
                     .execute_external_pipeline_segment(
                         state,
-                        name,
-                        args,
-                        &expanded_redirections,
+                        ExternalInvocation {
+                            program: name,
+                            args,
+                            redirections: &expanded_redirections,
+                            assignment_env: &prepared.assignment_env,
+                        },
                         None,
                         &mut job_context,
                     )
@@ -494,6 +701,12 @@ impl BootstrapExecutor {
         redirections: &[ExpandedRedirection],
         mode: ExecutionMode,
     ) -> ShellResult<ShellAction> {
+        let cwd = state.read().await.cwd().to_path_buf();
+        let body_mode = match mode {
+            ExecutionMode::Normal if redirections.is_empty() => ExecutionMode::Normal,
+            ExecutionMode::Normal => ExecutionMode::Capture,
+            other => other,
+        };
         let execution_state = match mode {
             ExecutionMode::Pipeline => clone_shell_state_for_pipeline(&state).await,
             ExecutionMode::Normal | ExecutionMode::Capture => state,
@@ -511,14 +724,16 @@ impl BootstrapExecutor {
             .write()
             .await
             .enter_function(name.to_string());
-        let result = self.execute_expr(execution_state.clone(), body, mode).await;
+        let result = self
+            .execute_expr(execution_state.clone(), body, body_mode)
+            .await;
         execution_state.write().await.exit_function();
 
         let action = result?;
 
         match action {
             ShellAction::Continue(output) => {
-                let plan = match build_redirection_plan(redirections) {
+                let plan = match build_redirection_plan(&cwd, redirections) {
                     Ok(plan) => plan,
                     Err(err) => {
                         return Ok(ShellAction::continue_with(CommandOutput {
@@ -554,11 +769,12 @@ impl BootstrapExecutor {
     ) -> ShellResult<ShellAction> {
         match mode {
             ExecutionMode::Normal | ExecutionMode::Capture => {
+                let cwd = state.read().await.cwd().to_path_buf();
                 let result = builtin.execute(state, args).await?;
 
                 match result {
                     ShellAction::Continue(output) => {
-                        let plan = match build_redirection_plan(redirections) {
+                        let plan = match build_redirection_plan(&cwd, redirections) {
                             Ok(plan) => plan,
                             Err(err) => {
                                 return Ok(ShellAction::continue_with(CommandOutput {
@@ -589,7 +805,8 @@ impl BootstrapExecutor {
 
                 match result {
                     ShellAction::Continue(output) => {
-                        let plan = match build_redirection_plan(redirections) {
+                        let cwd = state.read().await.cwd().to_path_buf();
+                        let plan = match build_redirection_plan(&cwd, redirections) {
                             Ok(plan) => plan,
                             Err(err) => {
                                 return Ok(ShellAction::continue_with(CommandOutput {
@@ -632,6 +849,7 @@ impl BootstrapExecutor {
             pgid: None,
             summary: summarize_pipeline(commands),
             foreground_claimed: false,
+            background: false,
         };
         let mut last_output = PipelineOutput {
             exit_code: ExitCode::SUCCESS,
@@ -680,8 +898,9 @@ impl BootstrapExecutor {
     ) -> ShellResult<PipelineOutput> {
         match node {
             CommandNode::Simple(simple) => {
-                let (expanded_argv, expanded_redirections) =
-                    expand_simple_command(state.clone(), simple).await?;
+                let prepared = expand_simple_command(state.clone(), simple).await?;
+                let expanded_argv = prepared.argv;
+                let expanded_redirections = prepared.redirections;
 
                 let Some((name, args)) = expanded_argv.split_first() else {
                     return Ok(PipelineOutput {
@@ -729,7 +948,8 @@ impl BootstrapExecutor {
 
                     return Ok(match result {
                         ShellAction::Continue(output) => {
-                            let plan = match build_redirection_plan(&expanded_redirections) {
+                            let cwd = state.read().await.cwd().to_path_buf();
+                            let plan = match build_redirection_plan(&cwd, &expanded_redirections) {
                                 Ok(plan) => plan,
                                 Err(err) => {
                                     return Ok(PipelineOutput {
@@ -765,9 +985,12 @@ impl BootstrapExecutor {
 
                 self.execute_external_pipeline_segment(
                     state,
-                    name,
-                    args,
-                    &expanded_redirections,
+                    ExternalInvocation {
+                        program: name,
+                        args,
+                        redirections: &expanded_redirections,
+                        assignment_env: &prepared.assignment_env,
+                    },
                     stdin_data,
                     job_context,
                 )
@@ -815,29 +1038,28 @@ impl BootstrapExecutor {
     async fn execute_external_pipeline_segment(
         &self,
         state: SharedShellState,
-        program: &str,
-        args: &[String],
-        redirections: &[ExpandedRedirection],
+        invocation: ExternalInvocation<'_>,
         stdin_data: Option<Vec<u8>>,
         job_context: &mut PipelineJobContext,
     ) -> ShellResult<PipelineOutput> {
-        let (cwd, env_map) = {
+        let (cwd, mut env_map) = {
             let guard = state.read().await;
             (guard.cwd().to_path_buf(), guard.env().clone())
         };
+        apply_env_overrides(&mut env_map, invocation.assignment_env);
 
-        let resolved = match resolve_command_path(program, &env_map) {
+        let resolved = match resolve_command_path(invocation.program, &env_map) {
             Some(path) => path,
             None => {
                 return Ok(PipelineOutput {
                     exit_code: ExitCode::FAILURE,
                     stdout: Vec::new(),
-                    stderr: format!("command not found: {program}\n").into_bytes(),
+                    stderr: format!("command not found: {}\n", invocation.program).into_bytes(),
                 });
             }
         };
 
-        let plan = match build_redirection_plan(redirections) {
+        let plan = match build_redirection_plan(&cwd, invocation.redirections) {
             Ok(plan) => plan,
             Err(err) => {
                 return Ok(PipelineOutput {
@@ -849,7 +1071,7 @@ impl BootstrapExecutor {
         };
 
         let mut command = Command::new(&resolved);
-        command.args(args);
+        command.args(invocation.args);
         command.current_dir(cwd);
         command.env_clear();
         command.envs(env_map);
@@ -923,7 +1145,8 @@ impl BootstrapExecutor {
                 return Ok(PipelineOutput {
                     exit_code: ExitCode::FAILURE,
                     stdout: Vec::new(),
-                    stderr: format!("failed to execute {program}: {err}\n").into_bytes(),
+                    stderr: format!("failed to execute {}: {err}\n", invocation.program)
+                        .into_bytes(),
                 });
             }
         };
@@ -933,11 +1156,12 @@ impl BootstrapExecutor {
             state.clone(),
             job_context,
             child_pid,
-            summarize_command(program, args),
+            summarize_command(invocation.program, invocation.args),
         )
         .await;
 
-        if !job_context.foreground_claimed
+        if !job_context.background
+            && !job_context.foreground_claimed
             && let Some(pgid) = job_context.pgid
         {
             job_context.foreground_claimed = unix::hand_terminal_to_foreground_job(pgid)?;
@@ -953,6 +1177,17 @@ impl BootstrapExecutor {
             && let Some(mut stdin) = child.stdin.take()
         {
             stdin.write_all(&input).await?;
+        }
+
+        if job_context.background {
+            let child_handles = { state.read().await.child_handles().clone() };
+            child_handles.insert(child_pid, child).await;
+
+            return Ok(PipelineOutput {
+                exit_code: ExitCode::SUCCESS,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            });
         }
 
         let stdout_task = spawn_pipe_reader(child.stdout.take());
@@ -1034,7 +1269,8 @@ impl BootstrapExecutor {
                 match next_action {
                     ShellAction::Continue(output) => {
                         state.write().await.set_last_exit_status(output.exit_code);
-                        aggregate = merge_outputs(aggregate, output);
+                        aggregate =
+                            merge_or_emit_outputs(state.clone(), mode, aggregate, output).await;
                     }
                     ShellAction::Exit(code) => return Ok(ShellAction::Exit(code)),
                 }
@@ -1058,7 +1294,7 @@ impl BootstrapExecutor {
             match action {
                 ShellAction::Continue(output) => {
                     state.write().await.set_last_exit_status(output.exit_code);
-                    aggregate = merge_outputs(aggregate, output);
+                    aggregate = merge_or_emit_outputs(state.clone(), mode, aggregate, output).await;
                 }
                 ShellAction::Exit(code) => return Ok(ShellAction::Exit(code)),
             }
@@ -1070,27 +1306,26 @@ impl BootstrapExecutor {
 
 async fn execute_external(
     state: SharedShellState,
-    program: &str,
-    args: &[String],
-    redirections: &[ExpandedRedirection],
+    invocation: ExternalInvocation<'_>,
 ) -> ShellResult<ShellAction> {
-    let (cwd, env_map) = {
+    let (cwd, mut env_map) = {
         let guard = state.read().await;
         (guard.cwd().to_path_buf(), guard.env().clone())
     };
+    apply_env_overrides(&mut env_map, invocation.assignment_env);
 
-    let resolved = match resolve_command_path(program, &env_map) {
+    let resolved = match resolve_command_path(invocation.program, &env_map) {
         Some(path) => path,
         None => {
             return Ok(ShellAction::continue_with(CommandOutput {
                 exit_code: ExitCode::FAILURE,
                 stdout: String::new(),
-                stderr: format!("command not found: {program}\n"),
+                stderr: format!("command not found: {}\n", invocation.program),
             }));
         }
     };
 
-    let plan = match build_redirection_plan(redirections) {
+    let plan = match build_redirection_plan(&cwd, invocation.redirections) {
         Ok(plan) => plan,
         Err(err) => {
             return Ok(ShellAction::continue_with(CommandOutput {
@@ -1102,7 +1337,7 @@ async fn execute_external(
     };
 
     let mut command = Command::new(&resolved);
-    command.args(args);
+    command.args(invocation.args);
     command.current_dir(cwd);
     command.env_clear();
     command.envs(env_map);
@@ -1144,7 +1379,7 @@ async fn execute_external(
             }
         }
     } else {
-        command.stdout(Stdio::inherit());
+        command.stdout(Stdio::null());
     }
 
     if let Some(redir) = &plan.stderr {
@@ -1164,7 +1399,7 @@ async fn execute_external(
             }
         }
     } else {
-        command.stderr(Stdio::inherit());
+        command.stderr(Stdio::null());
     }
 
     let mut child = match command.spawn() {
@@ -1173,14 +1408,18 @@ async fn execute_external(
             return Ok(ShellAction::continue_with(CommandOutput {
                 exit_code: ExitCode::FAILURE,
                 stdout: String::new(),
-                stderr: format!("failed to execute {program}: {err}\n"),
+                stderr: format!("failed to execute {}: {err}\n", invocation.program),
             }));
         }
     };
 
     let child_pid = child.id().unwrap_or_default();
-    let job_id =
-        register_foreground_job(state.clone(), child_pid, summarize_command(program, args)).await;
+    let job_id = register_foreground_job(
+        state.clone(),
+        child_pid,
+        summarize_command(invocation.program, invocation.args),
+    )
+    .await;
     let foreground_claimed = unix::hand_terminal_to_foreground_job(child_pid)?;
 
     if let Some(InputRedirection::Inline(input)) = &plan.stdin
@@ -1201,7 +1440,7 @@ async fn execute_external(
             return Ok(ShellAction::continue_with(CommandOutput {
                 exit_code: ExitCode::FAILURE,
                 stdout: String::new(),
-                stderr: format!("failed to execute {program}: {err}\n"),
+                stderr: format!("failed to execute {}: {err}\n", invocation.program),
             }));
         }
     };
@@ -1228,6 +1467,130 @@ async fn execute_external(
     Ok(ShellAction::continue_with(CommandOutput {
         exit_code,
         stdout: String::new(),
+        stderr: String::new(),
+    }))
+}
+
+async fn execute_external_background(
+    state: SharedShellState,
+    invocation: ExternalInvocation<'_>,
+) -> ShellResult<ShellAction> {
+    let (cwd, mut env_map) = {
+        let guard = state.read().await;
+        (guard.cwd().to_path_buf(), guard.env().clone())
+    };
+    apply_env_overrides(&mut env_map, invocation.assignment_env);
+
+    let resolved = match resolve_command_path(invocation.program, &env_map) {
+        Some(path) => path,
+        None => {
+            return Ok(ShellAction::continue_with(CommandOutput::failure(
+                ExitCode::FAILURE,
+                format!("command not found: {}\n", invocation.program),
+            )));
+        }
+    };
+
+    let plan = match build_redirection_plan(&cwd, invocation.redirections) {
+        Ok(plan) => plan,
+        Err(err) => {
+            return Ok(ShellAction::continue_with(CommandOutput::failure(
+                ExitCode::FAILURE,
+                format!("{err}\n"),
+            )));
+        }
+    };
+
+    let mut command = Command::new(&resolved);
+    command.args(invocation.args);
+    command.current_dir(cwd);
+    command.env_clear();
+    command.envs(env_map);
+    unix::configure_process_group(&mut command, None);
+
+    if let Some(InputRedirection::File(path)) = &plan.stdin {
+        match open_input_file(path) {
+            Ok(file) => {
+                command.stdin(Stdio::from(file));
+            }
+            Err(err) => {
+                return Ok(ShellAction::continue_with(CommandOutput::failure(
+                    ExitCode::FAILURE,
+                    format!("failed to open input file {}: {err}\n", path.display()),
+                )));
+            }
+        }
+    } else if matches!(plan.stdin, Some(InputRedirection::Inline(_))) {
+        command.stdin(Stdio::piped());
+    } else {
+        command.stdin(Stdio::inherit());
+    }
+
+    if let Some(redir) = &plan.stdout {
+        match open_output_file(redir) {
+            Ok(file) => {
+                command.stdout(Stdio::from(file));
+            }
+            Err(err) => {
+                return Ok(ShellAction::continue_with(CommandOutput::failure(
+                    ExitCode::FAILURE,
+                    format!(
+                        "failed to open output file {}: {err}\n",
+                        redir.path.display()
+                    ),
+                )));
+            }
+        }
+    } else {
+        command.stdout(Stdio::inherit());
+    }
+
+    if let Some(redir) = &plan.stderr {
+        match open_output_file(redir) {
+            Ok(file) => {
+                command.stderr(Stdio::from(file));
+            }
+            Err(err) => {
+                return Ok(ShellAction::continue_with(CommandOutput::failure(
+                    ExitCode::FAILURE,
+                    format!(
+                        "failed to open error file {}: {err}\n",
+                        redir.path.display()
+                    ),
+                )));
+            }
+        }
+    } else {
+        command.stderr(Stdio::inherit());
+    }
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return Ok(ShellAction::continue_with(CommandOutput::failure(
+                ExitCode::FAILURE,
+                format!("failed to execute {}: {err}\n", invocation.program),
+            )));
+        }
+    };
+
+    if let Some(InputRedirection::Inline(input)) = &plan.stdin
+        && let Some(mut stdin) = child.stdin.take()
+    {
+        stdin.write_all(input).await?;
+    }
+
+    let summary = summarize_command(invocation.program, invocation.args);
+    let child_pid = child.id().unwrap_or_default();
+    let child_handles = { state.read().await.child_handles().clone() };
+    child_handles.insert(child_pid, child).await;
+    let job_id = register_background_job(state, child_pid, summary.clone()).await;
+
+    Ok(ShellAction::continue_with(CommandOutput {
+        exit_code: ExitCode::SUCCESS,
+        stdout: job_id
+            .map(|job_id| format!("[{job_id}] {summary}\n"))
+            .unwrap_or_default(),
         stderr: String::new(),
     }))
 }
@@ -1269,7 +1632,10 @@ fn is_executable_file(path: &Path) -> bool {
     }
 }
 
-fn build_redirection_plan(redirections: &[ExpandedRedirection]) -> ShellResult<RedirectionPlan> {
+fn build_redirection_plan(
+    cwd: &Path,
+    redirections: &[ExpandedRedirection],
+) -> ShellResult<RedirectionPlan> {
     let mut plan = RedirectionPlan::empty();
 
     for redirect in redirections {
@@ -1277,7 +1643,8 @@ fn build_redirection_plan(redirections: &[ExpandedRedirection]) -> ShellResult<R
 
         match (&redirect.kind, fd) {
             (RedirectionKind::Input, 0) => {
-                plan.stdin = Some(InputRedirection::File(PathBuf::from(
+                plan.stdin = Some(InputRedirection::File(resolve_redirection_path(
+                    cwd,
                     redirect.target.as_deref().unwrap_or_default(),
                 )));
             }
@@ -1286,25 +1653,37 @@ fn build_redirection_plan(redirections: &[ExpandedRedirection]) -> ShellResult<R
             }
             (RedirectionKind::OutputTruncate, 1) => {
                 plan.stdout = Some(OutputRedirection {
-                    path: PathBuf::from(redirect.target.as_deref().unwrap_or_default()),
+                    path: resolve_redirection_path(
+                        cwd,
+                        redirect.target.as_deref().unwrap_or_default(),
+                    ),
                     append: false,
                 });
             }
             (RedirectionKind::OutputAppend, 1) => {
                 plan.stdout = Some(OutputRedirection {
-                    path: PathBuf::from(redirect.target.as_deref().unwrap_or_default()),
+                    path: resolve_redirection_path(
+                        cwd,
+                        redirect.target.as_deref().unwrap_or_default(),
+                    ),
                     append: true,
                 });
             }
             (RedirectionKind::OutputTruncate, 2) => {
                 plan.stderr = Some(OutputRedirection {
-                    path: PathBuf::from(redirect.target.as_deref().unwrap_or_default()),
+                    path: resolve_redirection_path(
+                        cwd,
+                        redirect.target.as_deref().unwrap_or_default(),
+                    ),
                     append: false,
                 });
             }
             (RedirectionKind::OutputAppend, 2) => {
                 plan.stderr = Some(OutputRedirection {
-                    path: PathBuf::from(redirect.target.as_deref().unwrap_or_default()),
+                    path: resolve_redirection_path(
+                        cwd,
+                        redirect.target.as_deref().unwrap_or_default(),
+                    ),
                     append: true,
                 });
             }
@@ -1322,6 +1701,15 @@ fn build_redirection_plan(redirections: &[ExpandedRedirection]) -> ShellResult<R
     }
 
     Ok(plan)
+}
+
+fn resolve_redirection_path(cwd: &Path, target: &str) -> PathBuf {
+    let path = PathBuf::from(target);
+    if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    }
 }
 
 fn open_input_file(path: &PathBuf) -> ShellResult<File> {
@@ -1379,11 +1767,50 @@ async fn clone_shell_state_for_pipeline(state: &SharedShellState) -> SharedShell
     Arc::new(RwLock::new(snapshot))
 }
 
+async fn state_with_env_overrides(
+    state: &SharedShellState,
+    overrides: &[(String, String)],
+) -> SharedShellState {
+    let scoped = clone_shell_state_for_pipeline(state).await;
+    let mut guard = scoped.write().await;
+    for (name, value) in overrides {
+        guard.set_env_var(name.clone(), value.clone());
+    }
+    drop(guard);
+    scoped
+}
+
+fn apply_env_overrides(env_map: &mut HashMap<String, String>, overrides: &[(String, String)]) {
+    for (name, value) in overrides {
+        env_map.insert(name.clone(), value.clone());
+    }
+}
+
 fn merge_outputs(mut left: CommandOutput, right: CommandOutput) -> CommandOutput {
     left.stdout.push_str(&right.stdout);
     left.stderr.push_str(&right.stderr);
     left.exit_code = right.exit_code;
     left
+}
+
+async fn merge_or_emit_outputs(
+    state: SharedShellState,
+    mode: ExecutionMode,
+    left: CommandOutput,
+    right: CommandOutput,
+) -> CommandOutput {
+    if matches!(mode, ExecutionMode::Normal)
+        && let Some(sink) = state.read().await.runtime_services().output_sink()
+    {
+        sink(&right);
+        return CommandOutput {
+            exit_code: right.exit_code,
+            stdout: left.stdout,
+            stderr: left.stderr,
+        };
+    }
+
+    merge_outputs(left, right)
 }
 
 fn process_state_from_wait_status(status: unix::ForegroundWaitStatus) -> (ProcessState, ExitCode) {
@@ -1471,6 +1898,25 @@ async fn register_foreground_job(
     Some(job_id)
 }
 
+async fn register_background_job(
+    state: SharedShellState,
+    pid: u32,
+    summary: String,
+) -> Option<JobId> {
+    if pid == 0 {
+        return None;
+    }
+
+    let job_id = state.write().await.jobs_mut().insert(
+        pid,
+        summary.clone(),
+        JobDisposition::Background,
+        vec![ProcessRecord::new(pid, summary)],
+    );
+
+    Some(job_id)
+}
+
 async fn register_pipeline_process(
     state: SharedShellState,
     context: &mut PipelineJobContext,
@@ -1490,10 +1936,15 @@ async fn register_pipeline_process(
             .jobs_mut()
             .add_process(job_id, ProcessRecord::new(pid, summary));
     } else {
+        let disposition = if context.background {
+            JobDisposition::Background
+        } else {
+            JobDisposition::Foreground
+        };
         let job_id = guard.jobs_mut().insert(
             pgid,
             context.summary.clone(),
-            JobDisposition::Foreground,
+            disposition,
             vec![ProcessRecord::new(pid, summary)],
         );
         context.job_id = Some(job_id);
@@ -1528,7 +1979,7 @@ fn summarize_pipeline(commands: &[CommandNode]) -> String {
 async fn expand_simple_command(
     state: SharedShellState,
     simple: &SimpleCommand,
-) -> ShellResult<(Vec<String>, Vec<ExpandedRedirection>)> {
+) -> ShellResult<PreparedSimpleCommand> {
     // Expansion order is: alias rewrite of the command word, assignment-prefix env updates,
     // variable/command substitution, then pathname globbing on argv only.
     let simple = resolve_aliases(state.clone(), simple).await?;
@@ -1537,9 +1988,12 @@ async fn expand_simple_command(
         Box::pin(async move { executor.execute_command_substitution(state, expr).await })
     });
 
+    let expansion_state = clone_shell_state_for_pipeline(&state).await;
+    let mut assignment_env = Vec::with_capacity(simple.assignments.len());
+
     for (name, value) in &simple.assignments {
         let expanded = expand_words_with_state(
-            state.clone(),
+            expansion_state.clone(),
             std::slice::from_ref(value),
             &substitution_executor,
         )
@@ -1548,17 +2002,31 @@ async fn expand_simple_command(
         .next()
         .unwrap_or_default();
 
-        state.write().await.set_env_var(name.clone(), expanded);
+        expansion_state
+            .write()
+            .await
+            .set_env_var(name.clone(), expanded.clone());
+        assignment_env.push((name.clone(), expanded));
     }
 
-    let argv =
-        expand_words_pathnames_with_state(state.clone(), &simple.argv, &substitution_executor)
-            .await?;
+    let argv = expand_words_pathnames_with_state(
+        expansion_state.clone(),
+        &simple.argv,
+        &substitution_executor,
+    )
+    .await?;
+
+    if argv.is_empty() {
+        let mut guard = state.write().await;
+        for (name, value) in &assignment_env {
+            guard.set_env_var(name.clone(), value.clone());
+        }
+    }
 
     let mut redirections = Vec::new();
     for redirection in &simple.redirections {
         let target = expand_words_with_state(
-            state.clone(),
+            expansion_state.clone(),
             std::slice::from_ref(&redirection.target),
             &substitution_executor,
         )
@@ -1581,7 +2049,7 @@ async fn expand_simple_command(
             kind: match &redirection.kind {
                 RedirectionKind::HereDoc { body, expand } => RedirectionKind::HereDoc {
                     body: if *expand {
-                        expand_heredoc_body(state.clone(), body).await?
+                        expand_heredoc_body(expansion_state.clone(), body).await?
                     } else {
                         body.clone()
                     },
@@ -1596,7 +2064,11 @@ async fn expand_simple_command(
         });
     }
 
-    Ok((argv, redirections))
+    Ok(PreparedSimpleCommand {
+        argv,
+        redirections,
+        assignment_env,
+    })
 }
 
 async fn resolve_aliases(
@@ -1824,7 +2296,7 @@ fn parse_command_substitution_source(source: &str) -> ShellResult<Box<ShellExpr>
         .parse(source)
         .map_err(|err| ShellError::message(err.to_string()))?
     {
-        ParsedCommand::Expr(expr) => Ok(Box::new(expr)),
+        ParsedCommand::Expr(expr) | ParsedCommand::Background(expr) => Ok(Box::new(expr)),
         ParsedCommand::Empty => Ok(Box::new(ShellExpr::Command(CommandNode::Simple(
             SimpleCommand::new(Vec::new()),
         )))),

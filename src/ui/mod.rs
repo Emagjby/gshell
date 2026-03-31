@@ -142,6 +142,20 @@ where
     E: Executor<ParsedCommand>,
 {
     pub async fn new(executor: E, state: SharedShellState) -> Self {
+        state
+            .write()
+            .await
+            .runtime_services_mut()
+            .set_output_sink(Some(Arc::new(|output| {
+                if !output.stdout.is_empty() {
+                    print!("{}", output.stdout);
+                }
+
+                if !output.stderr.is_empty() {
+                    eprint!("{}", output.stderr);
+                }
+            })));
+
         let menu_prompt = Arc::new(RwLock::new(String::new()));
         let history = build_history(state.clone()).await;
         let highlighter_palette = {

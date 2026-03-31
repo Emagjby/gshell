@@ -3,8 +3,8 @@ mod imp {
     use std::{fs::File, io, sync::OnceLock};
 
     use nix::{
-        sys::signal::killpg,
         sys::signal::{SigSet, SigmaskHow, Signal, pthread_sigmask},
+        sys::signal::{kill, killpg},
         sys::wait::{WaitPidFlag, WaitStatus, waitpid},
         unistd::{Pid, getpgrp, getpid, setpgid, tcgetpgrp, tcsetpgrp},
     };
@@ -79,6 +79,26 @@ mod imp {
         };
 
         killpg(pgid, Signal::SIGCONT).map_err(nix_err)
+    }
+
+    pub(crate) fn signal_process_group(pgid: u32, signal: i32) -> ShellResult<()> {
+        let Some(pgid) = pid_from_u32(pgid) else {
+            return Ok(());
+        };
+        let signal = Signal::try_from(signal)
+            .map_err(|_| ShellError::message(format!("unsupported signal: {signal}")))?;
+
+        killpg(pgid, signal).map_err(nix_err)
+    }
+
+    pub(crate) fn signal_process(pid: u32, signal: i32) -> ShellResult<()> {
+        let Some(pid) = pid_from_u32(pid) else {
+            return Ok(());
+        };
+        let signal = Signal::try_from(signal)
+            .map_err(|_| ShellError::message(format!("unsupported signal: {signal}")))?;
+
+        kill(pid, signal).map_err(nix_err)
     }
 
     pub(crate) async fn wait_for_foreground_process(pid: u32) -> ShellResult<ForegroundWaitStatus> {
@@ -238,6 +258,14 @@ mod imp {
     }
 
     pub(crate) fn continue_process_group(_pgid: u32) -> ShellResult<()> {
+        Ok(())
+    }
+
+    pub(crate) fn signal_process_group(_pgid: u32, _signal: i32) -> ShellResult<()> {
+        Ok(())
+    }
+
+    pub(crate) fn signal_process(_pid: u32, _signal: i32) -> ShellResult<()> {
         Ok(())
     }
 

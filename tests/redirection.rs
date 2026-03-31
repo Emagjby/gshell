@@ -60,6 +60,32 @@ async fn output_append_redirection_works() {
 }
 
 #[tokio::test]
+async fn output_append_redirection_uses_shell_working_directory() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let nested = dir.path().join("nested");
+    fs::create_dir(&nested).expect("nested dir should be created");
+    let out = nested.join("out.txt");
+    fs::write(&out, "first\n").expect("seed output file should be writable");
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+    state.write().await.set_cwd(nested.clone());
+
+    let parsed = parser
+        .parse("echo second >> out.txt")
+        .expect("parse should succeed");
+
+    let _ = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    let content = fs::read_to_string(&out).expect("output file should be readable");
+    assert_eq!(content, "first\nsecond\n");
+}
+
+#[tokio::test]
 async fn stderr_truncate_redirection_works() {
     let dir = tempfile::tempdir().expect("temp dir should be created");
     let err = dir.path().join("err.txt");

@@ -14,8 +14,10 @@ use crate::{
     config::{HighlighterConfig, PromptConfig},
     history::HistoryConfig,
     jobs::Jobs,
-    shell::ExitCode,
+    shell::{CommandOutput, ExitCode},
 };
+
+type OutputSink = Arc<dyn Fn(&CommandOutput) + Send + Sync>;
 
 pub type SharedShellState = Arc<RwLock<ShellState>>;
 
@@ -130,10 +132,24 @@ impl FunctionStore {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RuntimeServices {
     prompt_config: PromptConfig,
     highlighter_config: HighlighterConfig,
+    output_sink: Option<OutputSink>,
+}
+
+impl std::fmt::Debug for RuntimeServices {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeServices")
+            .field("prompt_config", &self.prompt_config)
+            .field("highlighter_config", &self.highlighter_config)
+            .field(
+                "output_sink",
+                &self.output_sink.as_ref().map(|_| "<installed>"),
+            )
+            .finish()
+    }
 }
 
 impl Default for RuntimeServices {
@@ -141,6 +157,7 @@ impl Default for RuntimeServices {
         Self {
             prompt_config: PromptConfig::from_env(),
             highlighter_config: HighlighterConfig::from_env(),
+            output_sink: None,
         }
     }
 }
@@ -160,6 +177,14 @@ impl RuntimeServices {
 
     pub fn set_highlighter_config(&mut self, config: HighlighterConfig) {
         self.highlighter_config = config;
+    }
+
+    pub fn output_sink(&self) -> Option<OutputSink> {
+        self.output_sink.clone()
+    }
+
+    pub fn set_output_sink(&mut self, sink: Option<OutputSink>) {
+        self.output_sink = sink;
     }
 }
 

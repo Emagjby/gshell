@@ -7,6 +7,7 @@ use crate::{
 pub enum ParsedCommand {
     Empty,
     Expr(ShellExpr),
+    Background(ShellExpr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +126,20 @@ fn parse_tokens(tokens: Vec<Token>) -> ParseResult<ParsedCommand> {
         return Ok(ParsedCommand::Empty);
     }
 
+    let background = matches!(tokens.last(), Some(Token::Ampersand));
+    let tokens = if background {
+        let mut tokens = tokens;
+        tokens.pop();
+        if tokens.is_empty() {
+            return Err(ParseError::incomplete(
+                "trailing '&' requires another command",
+            ));
+        }
+        tokens
+    } else {
+        tokens
+    };
+
     let mut cursor = TokenCursor::new(tokens);
     let expr = parse_sequence(&mut cursor)?;
 
@@ -135,7 +150,11 @@ fn parse_tokens(tokens: Vec<Token>) -> ParseResult<ParsedCommand> {
         )));
     }
 
-    Ok(ParsedCommand::Expr(expr))
+    if background {
+        Ok(ParsedCommand::Background(expr))
+    } else {
+        Ok(ParsedCommand::Expr(expr))
+    }
 }
 
 fn matches_incomplete_lex_error(msg: &str) -> bool {
@@ -271,7 +290,7 @@ fn parse_command(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
         | Some(Token::RedirectAppend) => parse_simple_command(cursor),
         Some(Token::RParen) => Err(ParseError::invalid("unexpected ')'")),
         Some(Token::LBrace | Token::RBrace) => Err(ParseError::invalid("unexpected brace")),
-        Some(Token::Pipe | Token::AndIf | Token::OrIf | Token::Semicolon) => {
+        Some(Token::Pipe | Token::Ampersand | Token::AndIf | Token::OrIf | Token::Semicolon) => {
             Err(ParseError::invalid("expected command"))
         }
         None => Err(ParseError::incomplete("expected command")),
@@ -482,6 +501,7 @@ fn heredoc_count(command: &ParsedCommand) -> usize {
     match command {
         ParsedCommand::Empty => 0,
         ParsedCommand::Expr(expr) => heredoc_count_expr(expr),
+        ParsedCommand::Background(expr) => heredoc_count_expr(expr),
     }
 }
 
@@ -513,8 +533,9 @@ fn heredoc_count_node(node: &CommandNode) -> usize {
 }
 
 fn collect_heredoc_bodies(command: &mut ParsedCommand, remainder: &str) -> ParseResult<()> {
-    let ParsedCommand::Expr(expr) = command else {
-        return Ok(());
+    let expr = match command {
+        ParsedCommand::Expr(expr) | ParsedCommand::Background(expr) => expr,
+        ParsedCommand::Empty => return Ok(()),
     };
 
     let mut cursor = HeredocBodyCursor::new(remainder);

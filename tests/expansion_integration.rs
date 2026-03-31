@@ -37,6 +37,35 @@ async fn variable_expansion_reaches_echo_builtin() {
 }
 
 #[tokio::test]
+async fn tilde_expansion_uses_home_environment_variable() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let state = ShellState::shared()
+        .await
+        .expect("failed to create shell state");
+    state
+        .write()
+        .await
+        .set_env_var("HOME", dir.path().display().to_string());
+
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+
+    let parsed = parser.parse("echo ~").expect("parse should succeed");
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, format!("{}\n", dir.path().display()));
+        }
+        ShellAction::Exit(_) => panic!("echo should not exit"),
+    }
+}
+
+#[tokio::test]
 async fn status_expansion_reaches_echo_builtin() {
     let state = ShellState::shared()
         .await

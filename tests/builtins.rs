@@ -1,7 +1,7 @@
 use gshell::{
     builtins::{
         AliasBuiltin, BgBuiltin, Builtin, BuiltinRegistry, CdBuiltin, ClearBuiltin, EchoBuiltin,
-        ExitBuiltin, FgBuiltin, HistoryBuiltin, JobsBuiltin, PwdBuiltin, TypeBuiltin,
+        ExitBuiltin, FgBuiltin, HistoryBuiltin, JobsBuiltin, KillBuiltin, PwdBuiltin, TypeBuiltin,
         UnaliasBuiltin,
     },
     jobs::{JobDisposition, JobState, ProcessState},
@@ -38,6 +38,7 @@ fn builtin_registry_lookup_works() {
     assert!(registry.contains("jobs"));
     assert!(registry.contains("fg"));
     assert!(registry.contains("bg"));
+    assert!(registry.contains("kill"));
     assert!(registry.get("missing").is_none());
 }
 
@@ -141,6 +142,57 @@ async fn bg_builtin_rejects_missing_current_job() {
     }
 }
 
+#[tokio::test]
+async fn kill_builtin_requires_at_least_one_target() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let builtin = KillBuiltin;
+
+    let result = builtin
+        .execute(state, &[])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::FAILURE);
+            assert_eq!(output.stderr, "kill: usage: kill [-SIGNAL] <pid|%job>...\n");
+        }
+        ShellAction::Exit(_) => panic!("kill should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn kill_builtin_rejects_invalid_job_ids() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let builtin = KillBuiltin;
+
+    let result = builtin
+        .execute(state.clone(), &["%abc".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::FAILURE);
+            assert_eq!(output.stderr, "kill: invalid job id: %abc\n");
+        }
+        ShellAction::Exit(_) => panic!("kill should not exit"),
+    }
+
+    let result = builtin
+        .execute(state, &["%1".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::FAILURE);
+            assert_eq!(output.stderr, "kill: no such job: %1\n");
+        }
+        ShellAction::Exit(_) => panic!("kill should not exit"),
+    }
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn bg_builtin_resumes_stopped_job_in_background() {
@@ -197,6 +249,39 @@ async fn fg_builtin_resumes_stopped_job_in_foreground() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn kill_builtin_terminates_job_by_job_id() {
+    let (state, _pid, job_id) = spawn_stopped_sleep_job().await;
+    let builtin = KillBuiltin;
+
+    let result = builtin
+        .execute(
+            state.clone(),
+            &[String::from("-KILL"), format!("%{job_id}")],
+        )
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert!(output.stdout.is_empty());
+            assert!(output.stderr.is_empty());
+        }
+        ShellAction::Exit(_) => panic!("kill should not exit"),
+    }
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    refresh_job_statuses(state.clone())
+        .await
+        .expect("job refresh should succeed");
+
+    let guard = state.read().await;
+    let job = guard.jobs().get(job_id).expect("job should exist");
+    assert_eq!(job.state(), JobState::Completed);
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn jobs_builtin_hides_completed_background_jobs_after_refresh() {
     let state = ShellState::shared().await.expect("state should initialize");
     let child = Command::new("sleep")
@@ -215,10 +300,34 @@ async fn jobs_builtin_hides_completed_background_jobs_after_refresh() {
         );
     }
 
-    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    refresh_job_statuses(state.clone())
-        .await
-        .expect("job refresh should succeed");
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            refresh_job_statuses(state.clone())
+                .await
+                .expect("job refresh should succeed");
+
+            let completed = {
+                let guard = state.read().await;
+                guard
+                    .jobs()
+                    .iter()
+                    .any(|job| job.processes().iter().any(|process| process.pid() == pid))
+                    && guard
+                        .jobs()
+                        .iter()
+                        .find(|job| job.processes().iter().any(|process| process.pid() == pid))
+                        .is_some_and(|job| job.state() == JobState::Completed)
+            };
+
+            if completed {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("job should complete within timeout");
 
     let builtin = JobsBuiltin;
     let result = builtin
@@ -737,6 +846,31 @@ async fn assignment_prefix_is_visible_to_builtin_arguments() {
         ShellAction::Continue(output) => {
             assert_eq!(output.exit_code, ExitCode::SUCCESS);
             assert_eq!(output.stdout, "gencho\n");
+        }
+        ShellAction::Exit(_) => panic!("echo should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn assignment_prefix_does_not_persist_after_builtin_runs() {
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse("NAME=gencho echo $NAME; echo $NAME")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state.clone(), &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "gencho\n\n");
+            assert_eq!(state.read().await.env_var("NAME"), None);
         }
         ShellAction::Exit(_) => panic!("echo should not exit"),
     }

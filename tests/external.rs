@@ -124,6 +124,7 @@ async fn assignment_prefix_updates_path_for_external_resolution() {
     let executor = BootstrapExecutor;
     let state = ShellState::shared().await.expect("state should initialize");
     let expected_path = dir.path().display().to_string();
+    let original_path = state.read().await.env_var("PATH").map(ToOwned::to_owned);
 
     let parsed = parser
         .parse(&format!("PATH={expected_path} demo-command"))
@@ -137,10 +138,7 @@ async fn assignment_prefix_updates_path_for_external_resolution() {
     match result {
         ShellAction::Continue(output) => {
             assert_eq!(output.exit_code, ExitCode::SUCCESS);
-            assert_eq!(
-                state.read().await.env_var("PATH"),
-                Some(expected_path.as_str())
-            );
+            assert_eq!(state.read().await.env_var("PATH"), original_path.as_deref());
         }
         ShellAction::Exit(_) => panic!("external command should not exit the shell"),
     }
