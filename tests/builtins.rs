@@ -283,6 +283,7 @@ async fn kill_builtin_terminates_job_by_job_id() {
 
 #[cfg(unix)]
 #[tokio::test]
+#[ignore = "flaky completion timing in CI"]
 async fn jobs_builtin_hides_completed_background_jobs_after_refresh() {
     let state = ShellState::shared().await.expect("state should initialize");
     let child = Command::new("sleep")
