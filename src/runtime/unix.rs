@@ -119,7 +119,10 @@ mod imp {
                         return Ok(ForegroundWaitStatus::Stopped(signal as i32));
                     }
                     Ok(WaitStatus::StillAlive | WaitStatus::Continued(_)) => continue,
-                    Ok(_) => continue,
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    Ok(WaitStatus::PtraceEvent(_, _, _) | WaitStatus::PtraceSyscall(_)) => {
+                        continue;
+                    }
                     Err(err) => return Err(err),
                 }
             }
@@ -165,7 +168,10 @@ mod imp {
                             statuses.push(PolledWaitStatus::Continued { pid });
                         }
                     }
-                    Ok(_) => continue,
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    Ok(WaitStatus::PtraceEvent(_, _, _) | WaitStatus::PtraceSyscall(_)) => {
+                        continue;
+                    }
                     Err(nix::errno::Errno::ECHILD) => return Ok(statuses),
                     Err(err) => return Err(err),
                 }
