@@ -6,9 +6,8 @@ use tracing_subscriber::{EnvFilter, fmt};
 async fn main() -> Result<()> {
     init_tracing();
 
-    tracing::info!("starting gshell...");
-
     let state = ShellState::shared().await?;
+    gshell::runtime::load_startup_file(state.clone()).await?;
     let executor = BootstrapExecutor;
     let mut repl = Repl::new(executor, state.clone()).await;
 

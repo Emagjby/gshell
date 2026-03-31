@@ -1,12 +1,12 @@
 use gshell::{
     builtins::{
         AliasBuiltin, BgBuiltin, Builtin, BuiltinRegistry, CdBuiltin, ClearBuiltin, EchoBuiltin,
-        ExitBuiltin, FgBuiltin, HistoryBuiltin, JobsBuiltin, KillBuiltin, PwdBuiltin, TypeBuiltin,
-        UnaliasBuiltin,
+        ExitBuiltin, FgBuiltin, HistoryBuiltin, JobsBuiltin, KillBuiltin, PwdBuiltin,
+        SourceBuiltin, TypeBuiltin, UnaliasBuiltin,
     },
     jobs::{JobDisposition, JobState, ProcessState},
     parser::Parser,
-    runtime::{BootstrapExecutor, Executor, refresh_job_statuses},
+    runtime::{BootstrapExecutor, Executor, load_startup_file, refresh_job_statuses},
     shell::{ExitCode, ShellAction, ShellState},
 };
 
@@ -39,6 +39,7 @@ fn builtin_registry_lookup_works() {
     assert!(registry.contains("fg"));
     assert!(registry.contains("bg"));
     assert!(registry.contains("kill"));
+    assert!(registry.contains("source"));
     assert!(registry.get("missing").is_none());
 }
 
@@ -755,6 +756,78 @@ async fn history_builtin_outputs_entries() {
         }
         ShellAction::Exit(_) => panic!("history should not exit"),
     }
+}
+
+#[tokio::test]
+async fn source_builtin_loads_gshrc_via_tilde_expansion() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let builtin = SourceBuiltin;
+    let tmp = tempfile::tempdir().expect("temp dir should be created");
+    let rc_path = tmp.path().join(".gshrc");
+
+    std::fs::write(&rc_path, "alias ll='echo first'\nRC_VALUE=loaded\n")
+        .expect("rc file should be written");
+
+    state
+        .write()
+        .await
+        .set_env_var("HOME", tmp.path().display().to_string());
+
+    let result = builtin
+        .execute(state.clone(), &["~/.gshrc".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            let guard = state.read().await;
+            assert_eq!(guard.aliases().get("ll"), Some("echo first"));
+            assert_eq!(guard.env_var("RC_VALUE"), Some("loaded"));
+        }
+        ShellAction::Exit(_) => panic!("source should not exit"),
+    }
+
+    std::fs::write(&rc_path, "alias ll='echo second'\nRC_VALUE=reloaded\n")
+        .expect("rc file should be rewritten");
+
+    let result = builtin
+        .execute(state.clone(), &["~/.gshrc".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            let guard = state.read().await;
+            assert_eq!(guard.aliases().get("ll"), Some("echo second"));
+            assert_eq!(guard.env_var("RC_VALUE"), Some("reloaded"));
+        }
+        ShellAction::Exit(_) => panic!("source should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn startup_loader_sources_gshrc_from_home() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let tmp = tempfile::tempdir().expect("temp dir should be created");
+    let rc_path = tmp.path().join(".gshrc");
+
+    std::fs::write(&rc_path, "GREETING=ready\ngreet() { echo hi; }\n")
+        .expect("rc file should be written");
+
+    state
+        .write()
+        .await
+        .set_env_var("HOME", tmp.path().display().to_string());
+
+    load_startup_file(state.clone())
+        .await
+        .expect("startup file should load");
+
+    let guard = state.read().await;
+    assert_eq!(guard.env_var("GREETING"), Some("ready"));
+    assert!(guard.functions().get("greet").is_some());
 }
 
 #[tokio::test]

@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     env,
     ffi::OsString,
+    fs,
     fs::{File, OpenOptions},
     future::Future,
     io,
@@ -129,6 +130,109 @@ pub trait Executor<C>: Send + Sync {
 
 pub async fn initialize_interactive_shell() -> ShellResult<()> {
     unix::initialize_interactive_shell().await
+}
+
+pub async fn load_startup_file(state: SharedShellState) -> ShellResult<()> {
+    let Some(path) = default_startup_file_path(&state).await else {
+        return Ok(());
+    };
+
+    if !path.is_file() {
+        return Ok(());
+    }
+
+    let display = path.display().to_string();
+    let action = source_path(state.clone(), path).await?;
+
+    match action {
+        ShellAction::Continue(output) => {
+            if !output.stdout.is_empty() {
+                print!("{}", output.stdout);
+            }
+
+            if !output.stderr.is_empty() {
+                eprint!("{}", output.stderr);
+            }
+
+            state.write().await.set_last_exit_status(output.exit_code);
+        }
+        ShellAction::Exit(code) => {
+            return Err(ShellError::message(format!(
+                "startup file requested shell exit: {display} ({})",
+                code.as_u8()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn source_file(state: SharedShellState, path: &str) -> ShellResult<ShellAction> {
+    let resolved = resolve_source_path(&state, path).await?;
+    source_path(state, resolved).await
+}
+
+async fn source_path(state: SharedShellState, path: PathBuf) -> ShellResult<ShellAction> {
+    let source = fs::read_to_string(&path)
+        .map_err(|err| ShellError::message(format!("source: {}: {err}", path.display())))?;
+    let normalized = normalize_source_for_parser(&source);
+
+    let parser = Parser::default();
+    let parsed = parser
+        .parse(&normalized)
+        .map_err(|err| ShellError::message(format!("source: {}: {err}", path.display())))?;
+
+    BootstrapExecutor.execute(state, &parsed).await
+}
+
+async fn default_startup_file_path(state: &SharedShellState) -> Option<PathBuf> {
+    let home = {
+        let guard = state.read().await;
+        guard.env_var("HOME").map(ToOwned::to_owned)
+    }?;
+
+    Some(PathBuf::from(home).join(".gshrc"))
+}
+
+async fn resolve_source_path(state: &SharedShellState, path: &str) -> ShellResult<PathBuf> {
+    let home = {
+        let guard = state.read().await;
+        guard.env_var("HOME").map(ToOwned::to_owned)
+    };
+
+    let expanded = expand_source_home(path, home.as_deref())
+        .ok_or_else(|| ShellError::message("source: HOME not set for '~' expansion"))?;
+
+    let resolved = if expanded.is_absolute() {
+        expanded
+    } else {
+        let cwd = state.read().await.cwd().to_path_buf();
+        cwd.join(expanded)
+    };
+
+    Ok(resolved)
+}
+
+fn expand_source_home(path: &str, home: Option<&str>) -> Option<PathBuf> {
+    match path {
+        "~" => home.map(PathBuf::from),
+        _ => {
+            if let Some(suffix) = path.strip_prefix("~/") {
+                home.map(|home| PathBuf::from(home).join(suffix))
+            } else {
+                Some(PathBuf::from(path))
+            }
+        }
+    }
+}
+
+fn normalize_source_for_parser(source: &str) -> String {
+    source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ; ")
 }
 
 pub async fn refresh_job_statuses(state: SharedShellState) -> ShellResult<()> {
@@ -1379,7 +1483,7 @@ async fn execute_external(
             }
         }
     } else {
-        command.stdout(Stdio::null());
+        command.stdout(Stdio::inherit());
     }
 
     if let Some(redir) = &plan.stderr {
@@ -1399,7 +1503,7 @@ async fn execute_external(
             }
         }
     } else {
-        command.stderr(Stdio::null());
+        command.stderr(Stdio::inherit());
     }
 
     let mut child = match command.spawn() {

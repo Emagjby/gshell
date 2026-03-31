@@ -6,6 +6,7 @@ mod exit;
 mod history;
 mod jobs;
 mod pwd;
+mod source;
 mod r#type;
 mod unalias;
 
@@ -17,6 +18,7 @@ pub use exit::ExitBuiltin;
 pub use history::HistoryBuiltin;
 pub use jobs::{BgBuiltin, FgBuiltin, JobsBuiltin, KillBuiltin};
 pub use pwd::PwdBuiltin;
+pub use source::SourceBuiltin;
 pub use r#type::TypeBuiltin;
 pub use unalias::UnaliasBuiltin;
 
@@ -63,6 +65,7 @@ impl BuiltinRegistry {
         registry.register(Arc::new(PwdBuiltin));
         registry.register(Arc::new(EchoBuiltin));
         registry.register(Arc::new(ClearBuiltin));
+        registry.register(Arc::new(SourceBuiltin));
         registry.register(Arc::new(TypeBuiltin));
         registry.register(Arc::new(UnaliasBuiltin));
         registry.register(Arc::new(ExitBuiltin));
