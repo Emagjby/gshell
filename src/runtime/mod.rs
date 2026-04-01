@@ -141,8 +141,10 @@ pub async fn load_startup_file(state: SharedShellState) -> ShellResult<()> {
         return Ok(());
     }
 
-    let display = path.display().to_string();
-    let action = source_path(state.clone(), path).await?;
+    let action = match source_path(state.clone(), path).await {
+        Ok(action) => action,
+        Err(_) => return Ok(()),
+    };
 
     match action {
         ShellAction::Continue(output) => {
@@ -156,12 +158,7 @@ pub async fn load_startup_file(state: SharedShellState) -> ShellResult<()> {
 
             state.write().await.set_last_exit_status(output.exit_code);
         }
-        ShellAction::Exit(code) => {
-            return Err(ShellError::message(format!(
-                "startup file requested shell exit: {display} ({})",
-                code.as_u8()
-            )));
-        }
+        ShellAction::Exit(_) => {}
     }
 
     Ok(())
@@ -230,7 +227,7 @@ fn normalize_source_for_parser(source: &str) -> String {
     source
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .collect::<Vec<_>>()
         .join(" ; ")
 }
@@ -1878,7 +1875,7 @@ async fn state_with_env_overrides(
     let scoped = clone_shell_state_for_pipeline(state).await;
     let mut guard = scoped.write().await;
     for (name, value) in overrides {
-        guard.set_env_var(name.clone(), value.clone());
+        guard.set_var(name.clone(), value.clone());
     }
     drop(guard);
     scoped
@@ -2109,7 +2106,7 @@ async fn expand_simple_command(
         expansion_state
             .write()
             .await
-            .set_env_var(name.clone(), expanded.clone());
+            .set_var(name.clone(), expanded.clone());
         assignment_env.push((name.clone(), expanded));
     }
 
@@ -2123,7 +2120,7 @@ async fn expand_simple_command(
     if argv.is_empty() {
         let mut guard = state.write().await;
         for (name, value) in &assignment_env {
-            guard.set_env_var(name.clone(), value.clone());
+            guard.set_var(name.clone(), value.clone());
         }
     }
 

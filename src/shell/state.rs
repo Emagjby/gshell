@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -190,7 +190,9 @@ impl RuntimeServices {
 
 #[derive(Debug, Clone)]
 pub struct ShellState {
+    vars: HashMap<String, String>,
     env: HashMap<String, String>,
+    exported_vars: HashSet<String>,
     cwd: PathBuf,
     last_exit_status: ExitCode,
     history: HistoryState,
@@ -210,7 +212,9 @@ impl ShellState {
             .to_path_buf();
 
         Ok(Self {
+            vars: std::env::vars().collect(),
             env: std::env::vars().collect(),
+            exported_vars: std::env::vars().map(|(key, _)| key).collect(),
             cwd: std::env::current_dir()?,
             last_exit_status: ExitCode::SUCCESS,
             history: HistoryState::new(history_path),
@@ -231,15 +235,42 @@ impl ShellState {
         &self.env
     }
 
+    pub fn vars(&self) -> &HashMap<String, String> {
+        &self.vars
+    }
+
     pub fn env_var(&self, key: &str) -> Option<&str> {
-        self.env.get(key).map(String::as_str)
+        self.vars
+            .get(key)
+            .or_else(|| self.env.get(key))
+            .map(String::as_str)
+    }
+
+    pub fn set_var(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.vars.insert(key.into(), value.into());
     }
 
     pub fn set_env_var(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.env.insert(key.into(), value.into());
+        let key = key.into();
+        let value = value.into();
+        self.vars.insert(key.clone(), value.clone());
+        self.env.insert(key.clone(), value);
+        self.exported_vars.insert(key);
+    }
+
+    pub fn export_var(&mut self, key: &str) -> bool {
+        let Some(value) = self.vars.get(key).cloned() else {
+            return false;
+        };
+
+        self.env.insert(key.to_string(), value);
+        self.exported_vars.insert(key.to_string());
+        true
     }
 
     pub fn remove_env_var(&mut self, key: &str) -> Option<String> {
+        self.vars.remove(key);
+        self.exported_vars.remove(key);
         self.env.remove(key)
     }
 

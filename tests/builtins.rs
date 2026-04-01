@@ -1,8 +1,8 @@
 use gshell::{
     builtins::{
         AliasBuiltin, BgBuiltin, Builtin, BuiltinRegistry, CdBuiltin, ClearBuiltin, EchoBuiltin,
-        ExitBuiltin, FgBuiltin, HistoryBuiltin, JobsBuiltin, KillBuiltin, PwdBuiltin,
-        SourceBuiltin, TypeBuiltin, UnaliasBuiltin,
+        ExitBuiltin, ExportBuiltin, FgBuiltin, HistoryBuiltin, JobsBuiltin, KillBuiltin,
+        PwdBuiltin, SourceBuiltin, TypeBuiltin, UnaliasBuiltin,
     },
     jobs::{JobDisposition, JobState, ProcessState},
     parser::Parser,
@@ -40,7 +40,55 @@ fn builtin_registry_lookup_works() {
     assert!(registry.contains("bg"));
     assert!(registry.contains("kill"));
     assert!(registry.contains("source"));
+    assert!(registry.contains("export"));
     assert!(registry.get("missing").is_none());
+}
+
+#[tokio::test]
+async fn export_builtin_sets_shell_environment() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let builtin = ExportBuiltin;
+
+    let result = builtin
+        .execute(state.clone(), &["NAME=gencho".into()])
+        .await
+        .expect("builtin execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(state.read().await.env_var("NAME"), Some("gencho"));
+            assert_eq!(
+                state.read().await.env().get("NAME").map(String::as_str),
+                Some("gencho")
+            );
+        }
+        ShellAction::Exit(_) => panic!("export should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn export_builtin_propagates_to_external_commands() {
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse("export NAME=gencho; echo $(printenv NAME)")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state, &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "gencho\n");
+        }
+        ShellAction::Exit(_) => panic!("export should not exit"),
+    }
 }
 
 #[tokio::test]
@@ -832,6 +880,47 @@ async fn startup_loader_sources_gshrc_from_home() {
 }
 
 #[tokio::test]
+async fn startup_loader_allows_hash_comments() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let tmp = tempfile::tempdir().expect("temp dir should be created");
+    let rc_path = tmp.path().join(".gshrc");
+
+    std::fs::write(&rc_path, "# comment\n# another\nGREETING=ready\n")
+        .expect("rc file should be written");
+
+    state
+        .write()
+        .await
+        .set_env_var("HOME", tmp.path().display().to_string());
+
+    load_startup_file(state.clone())
+        .await
+        .expect("startup file should load");
+
+    assert_eq!(state.read().await.env_var("GREETING"), Some("ready"));
+}
+
+#[tokio::test]
+async fn startup_loader_ignores_invalid_gshrc() {
+    let state = ShellState::shared().await.expect("state should initialize");
+    let tmp = tempfile::tempdir().expect("temp dir should be created");
+    let rc_path = tmp.path().join(".gshrc");
+
+    std::fs::write(&rc_path, "(").expect("rc file should be written");
+
+    state
+        .write()
+        .await
+        .set_env_var("HOME", tmp.path().display().to_string());
+
+    load_startup_file(state.clone())
+        .await
+        .expect("startup errors should be ignored");
+
+    assert_eq!(state.read().await.last_exit_status(), ExitCode::SUCCESS);
+}
+
+#[tokio::test]
 async fn parsed_argv_reaches_echo_builtin_with_single_quotes() {
     let parser = Parser::default();
     let executor = BootstrapExecutor;
@@ -880,7 +969,7 @@ async fn parsed_argv_reaches_echo_builtin_with_double_quotes() {
 }
 
 #[tokio::test]
-async fn assignment_only_command_updates_shell_environment() {
+async fn assignment_only_command_updates_shell_variable_only() {
     let parser = Parser::default();
     let executor = BootstrapExecutor;
     let state = ShellState::shared().await.expect("state should initialize");
@@ -896,6 +985,33 @@ async fn assignment_only_command_updates_shell_environment() {
         ShellAction::Continue(output) => {
             assert_eq!(output.exit_code, ExitCode::SUCCESS);
             assert_eq!(state.read().await.env_var("NAME"), Some("gencho"));
+            assert_eq!(state.read().await.env().get("NAME"), None);
+        }
+        ShellAction::Exit(_) => panic!("assignment should not exit"),
+    }
+}
+
+#[tokio::test]
+async fn assignment_only_command_is_not_visible_to_external_commands() {
+    let parser = Parser::default();
+    let executor = BootstrapExecutor;
+    let state = ShellState::shared().await.expect("state should initialize");
+
+    let parsed = parser
+        .parse("NAME=gencho; echo $(printenv NAME)")
+        .expect("parse should succeed");
+
+    let result = executor
+        .execute(state.clone(), &parsed)
+        .await
+        .expect("execution should succeed");
+
+    match result {
+        ShellAction::Continue(output) => {
+            assert_eq!(output.exit_code, ExitCode::SUCCESS);
+            assert_eq!(output.stdout, "\n");
+            assert_eq!(state.read().await.env_var("NAME"), Some("gencho"));
+            assert_eq!(state.read().await.env().get("NAME"), None);
         }
         ShellAction::Exit(_) => panic!("assignment should not exit"),
     }

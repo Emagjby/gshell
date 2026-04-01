@@ -3,6 +3,7 @@ mod cd;
 mod clear;
 mod echo;
 mod exit;
+mod export;
 mod history;
 mod jobs;
 mod pwd;
@@ -15,6 +16,7 @@ pub use cd::CdBuiltin;
 pub use clear::ClearBuiltin;
 pub use echo::EchoBuiltin;
 pub use exit::ExitBuiltin;
+pub use export::ExportBuiltin;
 pub use history::HistoryBuiltin;
 pub use jobs::{BgBuiltin, FgBuiltin, JobsBuiltin, KillBuiltin};
 pub use pwd::PwdBuiltin;
@@ -68,6 +70,7 @@ impl BuiltinRegistry {
         registry.register(Arc::new(SourceBuiltin));
         registry.register(Arc::new(TypeBuiltin));
         registry.register(Arc::new(UnaliasBuiltin));
+        registry.register(Arc::new(ExportBuiltin));
         registry.register(Arc::new(ExitBuiltin));
         registry
     }
