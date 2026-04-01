@@ -15,9 +15,12 @@ impl Builtin for CdBuiltin {
     fn execute<'a>(&'a self, state: SharedShellState, args: &'a [String]) -> BuiltinFuture<'a> {
         Box::pin(async move {
             let target = match args {
-                [] => std::env::var("HOME")
+                [] => state
+                    .read()
+                    .await
+                    .env_var("HOME")
                     .map(PathBuf::from)
-                    .map_err(|_| crate::shell::ShellError::message("cd: HOME not set"))?,
+                    .ok_or_else(|| crate::shell::ShellError::message("cd: HOME not set"))?,
                 [path] => PathBuf::from(path),
                 _ => {
                     return Ok(ShellAction::continue_with(CommandOutput {

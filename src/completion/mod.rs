@@ -176,7 +176,7 @@ impl ShellCompleter {
 
         let mut out = BTreeSet::new();
 
-        let env_keys = self.read_state(|state| state.env().keys().cloned().collect::<Vec<_>>());
+        let env_keys = self.read_state(|state| state.vars().keys().cloned().collect::<Vec<_>>());
 
         for key in env_keys {
             if key.starts_with(needle) {
