@@ -1,7 +1,10 @@
 pub mod highlighter;
 pub mod validator;
 
-use std::sync::{Arc, RwLock};
+use std::{
+    io::{self, Write},
+    sync::{Arc, RwLock},
+};
 
 use nu_ansi_term::Style;
 use reedline::{
@@ -241,6 +244,7 @@ where
 
     pub async fn run(&mut self, state: SharedShellState) -> ShellResult<()> {
         crate::runtime::initialize_interactive_shell().await?;
+        let _cursor_shape = BlockCursorGuard::new().ok();
 
         let renderer = Arc::new(ConfiguredPromptRenderer::new());
         let mut prompt =
@@ -357,4 +361,38 @@ async fn build_history(state: SharedShellState) -> ShellResult<FileBackedHistory
     state.write().await.history_mut().set_entries(entries);
 
     Ok(history)
+}
+
+struct BlockCursorGuard;
+
+impl BlockCursorGuard {
+    fn new() -> io::Result<Self> {
+        set_block_cursor(&mut io::stderr())?;
+        Ok(Self)
+    }
+}
+
+impl Drop for BlockCursorGuard {
+    fn drop(&mut self) {
+        let _ = set_block_cursor(&mut io::stderr());
+    }
+}
+
+fn set_block_cursor(writer: &mut impl Write) -> io::Result<()> {
+    writer.write_all(b"\x1b[2 q")?;
+    writer.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::set_block_cursor;
+
+    #[test]
+    fn block_cursor_escape_sequence_matches_decsusr_block_shape() {
+        let mut output = Vec::new();
+
+        set_block_cursor(&mut output).expect("cursor sequence should be written");
+
+        assert_eq!(output, b"\x1b[2 q");
+    }
 }

@@ -544,3 +544,42 @@ fn parser_keeps_command_substitution_inside_word_segments() {
         ))))
     );
 }
+
+#[test]
+fn braces_without_shell_spacing_stay_a_single_literal_word() {
+    let lexer = Lexer;
+    let tokens = lexer.tokenize("{}").expect("tokenization should succeed");
+
+    assert_eq!(tokens, vec![Token::Word(lit("{}"))]);
+
+    let parsed = Parser::default().parse("{}").expect("parse should succeed");
+
+    assert_eq!(
+        parsed,
+        ParsedCommand::Expr(ShellExpr::Command(CommandNode::Simple(SimpleCommand::new(
+            vec![lit("{}")]
+        ))))
+    );
+}
+
+#[test]
+fn alphanumeric_words_starting_with_digits_stay_single_literals() {
+    let lexer = Lexer;
+    let tokens = lexer
+        .tokenize("1fer34")
+        .expect("tokenization should succeed");
+
+    assert_eq!(tokens, vec![Token::Word(lit("1fer34"))]);
+}
+
+#[test]
+fn parser_errors_describe_shell_tokens_without_rust_debug_types() {
+    let err = Parser::default()
+        .parse("echo > {")
+        .expect_err("parse should fail");
+
+    assert_eq!(err.kind, ParseErrorKind::Invalid);
+    assert!(err.message.contains("found '{'"));
+    assert!(!err.message.contains("Token("));
+    assert!(!err.message.contains("LBrace"));
+}

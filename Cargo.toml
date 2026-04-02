@@ -1,6 +1,6 @@
 [package]
 name = "gshell"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 rust-version = "1.85"
 description = "gshell is a shell for people who live in the terminal. It pairs familiar Unix behavior with a tighter core, fast interaction, and an interface built to stay out of the way."

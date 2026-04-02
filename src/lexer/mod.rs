@@ -61,7 +61,7 @@ impl Lexer {
                     chars.next();
                     tokens.push(Token::Semicolon);
                 }
-                '{' => {
+                '{' if is_standalone_brace(chars.clone(), '{') => {
                     chars.next();
                     tokens.push(Token::LBrace);
                 }
@@ -69,7 +69,7 @@ impl Lexer {
                     chars.next();
                     tokens.push(Token::LParen);
                 }
-                '}' => {
+                '}' if is_standalone_brace(chars.clone(), '}') => {
                     chars.next();
                     tokens.push(Token::RBrace);
                 }
@@ -115,7 +115,10 @@ impl Lexer {
                             tokens.push(Token::IoNumber(fd));
                         }
                         _ => {
-                            tokens.push(Token::Word(Word::literal(digits)));
+                            let word = self.read_word_with_literal(&mut chars, digits)?;
+                            if !word.segments.is_empty() {
+                                tokens.push(Token::Word(word));
+                            }
                         }
                     }
                 }
@@ -135,13 +138,23 @@ impl Lexer {
     where
         I: Iterator<Item = char>,
     {
+        self.read_word_with_literal(chars, String::new())
+    }
+
+    fn read_word_with_literal<I>(
+        &self,
+        chars: &mut std::iter::Peekable<I>,
+        mut literal: String,
+    ) -> ShellResult<Word>
+    where
+        I: Iterator<Item = char>,
+    {
         let mut segments = Vec::new();
-        let mut literal = String::new();
 
         while let Some(ch) = chars.peek().copied() {
             match ch {
                 c if c.is_whitespace() => break,
-                '|' | '&' | ';' | '>' | '<' | '(' | ')' | '{' | '}' => break,
+                '|' | '&' | ';' | '>' | '<' | '(' | ')' => break,
                 '\'' => {
                     flush_literal(&mut literal, &mut segments, QuoteKind::Unquoted);
                     chars.next();
@@ -444,6 +457,21 @@ fn is_var_start(c: char) -> bool {
 
 fn is_var_continue(c: char) -> bool {
     c == '_' || c.is_ascii_alphanumeric()
+}
+
+fn is_standalone_brace<I>(mut chars: std::iter::Peekable<I>, brace: char) -> bool
+where
+    I: Iterator<Item = char>,
+{
+    match chars.next() {
+        Some(current) if current == brace => {}
+        _ => return false,
+    }
+
+    match chars.peek().copied() {
+        None => true,
+        Some(next) => next.is_whitespace() || matches!(next, '|' | '&' | ';' | '>' | '<'),
+    }
 }
 
 fn parse_command_substitution_expr(source: &str) -> ShellResult<Box<ShellExpr>> {

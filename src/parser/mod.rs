@@ -145,8 +145,8 @@ fn parse_tokens(tokens: Vec<Token>) -> ParseResult<ParsedCommand> {
 
     if !cursor.is_eof() {
         return Err(ParseError::invalid(format!(
-            "unexpected trailing token: {:?}",
-            cursor.peek()
+            "unexpected trailing token: {}",
+            describe_optional_token(cursor.peek())
         )));
     }
 
@@ -327,8 +327,8 @@ fn parse_function_definition(cursor: &mut TokenCursor) -> ParseResult<CommandNod
         Some(Token::LParen) => {}
         other => {
             return Err(ParseError::invalid(format!(
-                "expected '(' after function name, found {:?}",
-                other
+                "expected '(' after function name, found {}",
+                describe_owned_token(other)
             )));
         }
     }
@@ -338,8 +338,8 @@ fn parse_function_definition(cursor: &mut TokenCursor) -> ParseResult<CommandNod
         None => return Err(ParseError::incomplete("unclosed function signature")),
         other => {
             return Err(ParseError::invalid(format!(
-                "expected ')' after function name, found {:?}",
-                other
+                "expected ')' after function name, found {}",
+                describe_owned_token(other)
             )));
         }
     }
@@ -349,8 +349,8 @@ fn parse_function_definition(cursor: &mut TokenCursor) -> ParseResult<CommandNod
         None => return Err(ParseError::incomplete("function body missing '{'")),
         other => {
             return Err(ParseError::invalid(format!(
-                "expected '{{' to start function body, found {:?}",
-                other
+                "expected '{{' to start function body, found {}",
+                describe_owned_token(other)
             )));
         }
     }
@@ -377,8 +377,8 @@ fn parse_subshell(cursor: &mut TokenCursor) -> ParseResult<CommandNode> {
         Some(Token::RParen) => Ok(CommandNode::Subshell(Box::new(expr))),
         None => Err(ParseError::incomplete("unclosed subshell")),
         other => Err(ParseError::invalid(format!(
-            "expected ')' but found {:?}",
-            other
+            "expected ')' but found {}",
+            describe_owned_token(other)
         ))),
     }
 }
@@ -477,8 +477,8 @@ fn parse_redirection(cursor: &mut TokenCursor) -> ParseResult<Redirection> {
         Some(Token::RedirectAppend) => RedirectionKind::OutputAppend,
         other => {
             return Err(ParseError::invalid(format!(
-                "expected redirection operator, found {:?}",
-                other
+                "expected redirection operator, found {}",
+                describe_owned_token(other)
             )));
         }
     };
@@ -488,8 +488,8 @@ fn parse_redirection(cursor: &mut TokenCursor) -> ParseResult<Redirection> {
         None => return Err(ParseError::incomplete("redirection missing target")),
         other => {
             return Err(ParseError::invalid(format!(
-                "redirection target must be a word, found {:?}",
-                other
+                "redirection target must be a word, found {}",
+                describe_owned_token(other)
             )));
         }
     };
@@ -640,4 +640,37 @@ impl<'a> HeredocBodyCursor<'a> {
 
 fn normalize_heredoc_line(line: &str) -> String {
     line.trim_end_matches(['\r', '\n']).to_string()
+}
+
+fn describe_optional_token(token: Option<&Token>) -> String {
+    token.map_or_else(|| "end of input".to_string(), describe_token)
+}
+
+fn describe_owned_token(token: Option<Token>) -> String {
+    token
+        .as_ref()
+        .map_or_else(|| "end of input".to_string(), describe_token)
+}
+
+fn describe_token(token: &Token) -> String {
+    match token {
+        Token::Word(word) => match word.as_unquoted_literal() {
+            Some(text) => format!("word '{text}'"),
+            None => "word".to_string(),
+        },
+        Token::Pipe => "'|'".to_string(),
+        Token::Ampersand => "'&'".to_string(),
+        Token::AndIf => "'&&'".to_string(),
+        Token::OrIf => "'||'".to_string(),
+        Token::Semicolon => "';'".to_string(),
+        Token::RedirectIn => "'<'".to_string(),
+        Token::RedirectHeredoc => "'<<'".to_string(),
+        Token::RedirectOut => "'>'".to_string(),
+        Token::RedirectAppend => "'>>'".to_string(),
+        Token::LBrace => "'{'".to_string(),
+        Token::RBrace => "'}'".to_string(),
+        Token::LParen => "'('".to_string(),
+        Token::RParen => "')'".to_string(),
+        Token::IoNumber(fd) => format!("file descriptor '{fd}'"),
+    }
 }
